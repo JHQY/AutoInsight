@@ -69,3 +69,65 @@ def test_modeling_appends_log(clf_arrays):
     X_train, X_test, y_train, _ = clf_arrays
     result = modeling_node(_state(X_train, X_test, y_train, ["LogisticRegression"]))
     assert any("[modeling]" in log for log in result["logs"])
+
+
+def _unsupervised_state(X_train, X_test, algorithms, task_type="clustering"):
+    return {
+        "X_train": X_train,
+        "X_test":  X_test,
+        "y_train": None,
+        "y_test":  None,
+        "selected_algorithms": algorithms,
+        "task_type": task_type,
+        "tune": False,
+        "logs": [],
+    }
+
+
+def test_modeling_clustering_kmeans(clf_arrays):
+    X_train, X_test, _, _ = clf_arrays
+    result = modeling_node(_unsupervised_state(X_train, X_test, ["KMeans"]))
+    assert "KMeans" in result["model_results"]
+    assert "error" not in result["model_results"]["KMeans"]
+    assert "labels" in result["model_results"]["KMeans"]
+
+
+def test_modeling_clustering_labels_length(clf_arrays):
+    X_train, X_test, _, _ = clf_arrays
+    result = modeling_node(_unsupervised_state(X_train, X_test, ["KMeans"]))
+    labels = result["model_results"]["KMeans"]["labels"]
+    assert isinstance(labels, list)
+    assert len(labels) == len(X_test)
+
+
+def test_modeling_isolation_forest(clf_arrays):
+    X_train, X_test, _, _ = clf_arrays
+    state = _unsupervised_state(X_train, X_test, ["IsolationForest"], task_type="anomaly_detection")
+    result = modeling_node(state)
+    assert "IsolationForest" in result["model_results"]
+    assert "error" not in result["model_results"]["IsolationForest"]
+    preds = result["model_results"]["IsolationForest"]["labels"]
+    assert set(preds).issubset({1, -1})
+
+
+def test_modeling_dbscan_uses_fit_predict(clf_arrays):
+    X_train, X_test, _, _ = clf_arrays
+    result = modeling_node(_unsupervised_state(X_train, X_test, ["DBSCAN"]))
+    assert "DBSCAN" in result["model_results"]
+    assert "labels" in result["model_results"]["DBSCAN"]
+
+
+def test_modeling_tune_flag_classification(clf_arrays):
+    X_train, X_test, y_train, _ = clf_arrays
+    state = {
+        "X_train": X_train, "X_test": X_test,
+        "y_train": y_train, "y_test": None,
+        "selected_algorithms": ["RandomForestClassifier"],
+        "task_type": "classification",
+        "tune": True,
+        "logs": [],
+    }
+    result = modeling_node(state)
+    assert "RandomForestClassifier" in result["model_results"]
+    assert "error" not in result["model_results"]["RandomForestClassifier"]
+    assert len(result["model_results"]["RandomForestClassifier"]["y_pred"]) == len(X_test)
