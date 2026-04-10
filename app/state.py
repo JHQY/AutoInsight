@@ -1,6 +1,21 @@
 from typing import TypedDict, Any
 import pandas as pd
 
+class EDASummary(TypedDict, total=False):
+    """
+    EDA 节点的结构化输出，供 Reporting 直接消费。
+    """
+    top3_features: str
+    distribution_desc: str
+    layer_desc: str
+    abnormal_desc: str
+    feature_1: str
+    feature_2: str
+    feature_3: str
+    feature_1_corr: float
+    feature_2_corr: float
+    feature_3_corr: float
+
 class AgentState(TypedDict):
 
     # ── 入口字段（由 main.py 初始化）────────────────────────────────
@@ -65,6 +80,8 @@ class AgentState(TypedDict):
     #   - 分布图 / 相关性热力图 / 特征-目标关系图（EDA 阶段）
     #   - confusion matrix / residual plot（评估阶段，由 EDA skill 负责出图）
     # 示例：["outputs/charts/hist_age.png", "outputs/charts/confusion_matrix.png"]
+    eda_summary:          EDASummary
+    # 结构化 EDA 文本+指标结果，供 reporting.py 填充报告字段
 
     # ── Reporting Skill ───────────────────────────────────────────────
     report_path:          str        # 示例："outputs/reports/analysis_report.md"
