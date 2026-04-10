@@ -79,3 +79,89 @@ def test_evaluation_raises_if_all_models_failed():
     model_results = {"Broken": {"error": "failed"}}
     with pytest.raises(RuntimeError, match="All models failed"):
         evaluation_node(_state(model_results, y_test, "classification"))
+
+
+def test_evaluation_clustering_metrics_keys():
+    import numpy as np
+    X_test = pd.DataFrame(np.random.randn(20, 2), columns=["a", "b"])
+    model_results = {
+        "KMeans": {"labels": [0]*10 + [1]*10, "model": None}
+    }
+    state = {
+        "model_results": model_results,
+        "X_test": X_test,
+        "y_test": None,
+        "task_type": "clustering",
+        "logs": [],
+    }
+    result = evaluation_node(state)
+    assert "KMeans" in result["metrics"]
+    assert "silhouette" in result["metrics"]["KMeans"]
+    assert "davies_bouldin" in result["metrics"]["KMeans"]
+
+
+def test_evaluation_clustering_best_model_by_silhouette():
+    import numpy as np
+    X_test = pd.DataFrame(np.random.randn(40, 2), columns=["a", "b"])
+    # KMeans gets good silhouette, DBSCAN gets sentinel -1
+    model_results = {
+        "KMeans": {"labels": [0]*20 + [1]*20, "model": None},
+        "DBSCAN": {"labels": [-1]*40, "model": None},  # all noise → sentinel
+    }
+    state = {
+        "model_results": model_results,
+        "X_test": X_test,
+        "y_test": None,
+        "task_type": "clustering",
+        "logs": [],
+    }
+    result = evaluation_node(state)
+    assert result["best_model"] == "KMeans"
+
+
+def test_evaluation_anomaly_metrics_keys():
+    import numpy as np
+    X_test = pd.DataFrame(np.random.randn(20, 2), columns=["a", "b"])
+    preds = [1] * 18 + [-1, -1]
+    model_results = {
+        "IsolationForest": {"labels": preds, "model": None}
+    }
+    state = {
+        "model_results": model_results,
+        "X_test": X_test,
+        "y_test": None,
+        "task_type": "anomaly_detection",
+        "logs": [],
+    }
+    result = evaluation_node(state)
+    assert "IsolationForest" in result["metrics"]
+    assert "anomaly_ratio" in result["metrics"]["IsolationForest"]
+    assert abs(result["metrics"]["IsolationForest"]["anomaly_ratio"] - 0.1) < 0.01
+
+
+def test_evaluation_correlation_analysis_returns_empty():
+    state = {
+        "model_results": {},
+        "X_test": pd.DataFrame(),
+        "y_test": None,
+        "task_type": "correlation_analysis",
+        "logs": [],
+    }
+    result = evaluation_node(state)
+    assert result["metrics"] == {}
+    assert result["best_model"] == ""
+
+
+def test_evaluation_anomaly_appends_log():
+    import numpy as np
+    X_test = pd.DataFrame(np.random.randn(10, 2), columns=["a", "b"])
+    model_results = {"IsolationForest": {"labels": [1]*9 + [-1], "model": None}}
+    state = {
+        "model_results": model_results,
+        "X_test": X_test,
+        "y_test": None,
+        "task_type": "anomaly_detection",
+        "logs": [],
+    }
+    result = evaluation_node(state)
+    assert any("[evaluation]" in log for log in result["logs"])
