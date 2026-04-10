@@ -12,7 +12,8 @@ def data_processing(state: AgentState) -> AgentState:
     """
     # 从状态读取输入
     file_path = state["file_path"]
-    target_col = state["target_column"]
+    task_category = state.get("task_category", "supervised")
+    target_col = state.get("target_column", "")
     schema = state["schema"]
     quality_issues = state.get("quality_issues", [])
     logs = state.get("logs", [])
@@ -21,9 +22,11 @@ def data_processing(state: AgentState) -> AgentState:
     df = pd.read_csv(file_path)
     logs.append("[processing] 成功读取 CSV 文件")
 
-    # 分离特征与目标（双层括号保证y为DataFrame）
-    X = df.drop(columns=[target_col])
-    y = df[[target_col]]
+    # Split features from target
+    if task_category in ("unsupervised", "analytical") or not target_col:
+        X = df.copy()
+    else:
+        X = df.drop(columns=[target_col])
     feature_names = list(X.columns)
 
     # 缺失值填充（无警告版）
@@ -56,26 +59,37 @@ def data_processing(state: AgentState) -> AgentState:
         X[numeric_cols] = scaler.fit_transform(X[numeric_cols])
         logs.append(f"[processing] 数值列 {numeric_cols} 标准化完成")
 
-    # 数据集拆分
+    # Train/test split — unsupervised: no y
+    if task_category in ("unsupervised", "analytical") or not target_col:
+        from sklearn.model_selection import train_test_split as _split
+        X_train, X_test = _split(X, test_size=0.2, random_state=42)
+        state["X_train"] = X_train
+        state["X_test"] = X_test
+        state["y_train"] = None
+        state["y_test"] = None
+        state["feature_names"] = feature_names
+        state["logs"] = logs + ["[processing] 无监督分支，跳过 y 拆分"]
+        return state
+
+    # Supervised: split with y
+    y = df[[target_col]]
     try:
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42, stratify=y
         )
         logs.append("[processing] 完成 80/20 分层拆分")
-    except:
+    except Exception:
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42
         )
         logs.append("[processing] 回归任务，使用普通 80/20 拆分")
 
-    # 写回状态
     state["X_train"] = X_train
     state["X_test"] = X_test
     state["y_train"] = y_train
     state["y_test"] = y_test
     state["feature_names"] = feature_names
     state["logs"] = logs
-
     return state
 
 # ===================== 本地测试代码=====================
