@@ -72,10 +72,21 @@ def run_eda(state: AgentState) -> AgentState:
         }
 
         updated_state["charts"].extend(chart_paths)
+
+        # Compute modeling hints
+        modeling_hints = _compute_modeling_hints(
+            data,
+            target_column,
+            updated_state.get("task_category", "supervised"),
+            updated_state.get("y_train"),
+        )
+        updated_state["modeling_hints"] = modeling_hints
+
         updated_state["logs"].append("[EDA] EDA 分析完成，已生成图表与洞察摘要")
         return updated_state
     except Exception as exc:
         updated_state["logs"].append(f"[EDA] EDA 分析失败: {exc}")
+        updated_state["modeling_hints"] = {}
         return updated_state
 
 
@@ -239,3 +250,64 @@ def _detect_target_outliers(data: pd.DataFrame, target_column: str) -> Tuple[str
     desc = f"检测到{outlier_count}个异常值，占比{ratio:.2%}。"
     issue = f"{target_column} 存在异常值 {outlier_count} 个（占比 {ratio:.2%}）"
     return desc, issue
+
+
+def _compute_modeling_hints(data: pd.DataFrame, target_column: str,
+                             task_category: str, y_train) -> dict:
+    """Compute structured modeling hints for model_routing_node."""
+    hints: dict = {
+        "sample_size":   len(data),
+        "feature_count": len([c for c in data.columns if c != target_column]),
+    }
+
+    numeric_data = data.select_dtypes(include=[np.number])
+
+    # linearity_score: mean |pearson| of features vs target (supervised only)
+    if task_category == "supervised" and target_column in numeric_data.columns:
+        corr = (
+            numeric_data.corr()[target_column]
+            .drop(labels=[target_column], errors="ignore")
+            .dropna()
+        )
+        hints["linearity_score"] = round(float(corr.abs().mean()), 4) if not corr.empty else 0.0
+    else:
+        hints["linearity_score"] = 0.0
+
+    # outlier_ratio: IQR method on target column
+    if target_column in data.columns:
+        target = pd.to_numeric(data[target_column], errors="coerce").dropna()
+        if len(target) > 0:
+            q1, q3 = target.quantile(0.25), target.quantile(0.75)
+            iqr = q3 - q1
+            if iqr > 0:
+                mask = (target < q1 - 1.5 * iqr) | (target > q3 + 1.5 * iqr)
+                hints["outlier_ratio"] = round(float(mask.sum()) / len(target), 4)
+            else:
+                hints["outlier_ratio"] = 0.0
+        else:
+            hints["outlier_ratio"] = 0.0
+    else:
+        hints["outlier_ratio"] = 0.0
+
+    # imbalance_ratio: minority class fraction (supervised + y_train not None)
+    if task_category == "supervised" and y_train is not None:
+        y_series = (
+            y_train.iloc[:, 0] if isinstance(y_train, pd.DataFrame)
+            else pd.Series(y_train)
+        )
+        counts = y_series.value_counts(normalize=True)
+        if len(counts) >= 2:
+            hints["imbalance_ratio"] = round(float(counts.min()), 4)
+
+    # high_corr_pairs: feature pairs with |correlation| > 0.9
+    num_cols = [c for c in numeric_data.columns if c != target_column]
+    pairs: list[str] = []
+    if len(num_cols) >= 2:
+        corr_matrix = numeric_data[num_cols].corr().abs()
+        for i in range(len(num_cols)):
+            for j in range(i + 1, len(num_cols)):
+                if corr_matrix.iloc[i, j] > 0.9:
+                    pairs.append(f"{num_cols[i]}-{num_cols[j]}")
+    hints["high_corr_pairs"] = pairs
+
+    return hints
