@@ -3,7 +3,7 @@ import pytest
 from nodes.model_routing import model_routing_node, ModelRoutingOutput
 
 
-def _state(task_category, task_type, hints, algorithms, reasoning="test"):
+def _state(task_category, task_type, hints):
     return {
         "task_category":       task_category,
         "task_type":           task_type,
@@ -34,7 +34,6 @@ def test_classification_routing(mock_chat):
     result = model_routing_node(_state(
         "supervised", "classification",
         {"linearity_score": 0.3, "imbalance_ratio": 0.45, "sample_size": 500, "feature_count": 4},
-        [], ""
     ))
     assert result["task_type"] == "classification"
     assert "XGBClassifier" in result["selected_algorithms"]
@@ -46,7 +45,6 @@ def test_clustering_routing(mock_chat):
     result = model_routing_node(_state(
         "unsupervised", "clustering",
         {"sample_size": 300, "feature_count": 3},
-        [], ""
     ))
     assert result["task_type"] == "clustering"
     assert "KMeans" in result["selected_algorithms"]
@@ -58,7 +56,6 @@ def test_correlation_analysis_returns_empty_algorithms(mock_chat):
     result = model_routing_node(_state(
         "analytical", "correlation_analysis",
         {"sample_size": 200, "feature_count": 5},
-        [], ""
     ))
     assert result["task_type"] == "correlation_analysis"
     assert result["selected_algorithms"] == []
@@ -70,10 +67,8 @@ def test_returns_reasoning(mock_chat):
     result = model_routing_node(_state(
         "supervised", "regression",
         {"linearity_score": 0.85, "sample_size": 1000, "feature_count": 8},
-        [], ""
     ))
-    assert isinstance(result["reasoning"], str)
-    assert len(result["reasoning"]) > 0
+    assert result["reasoning"] == "High linearity detected"
 
 
 @patch("nodes.model_routing.ChatOpenAI")
@@ -82,6 +77,5 @@ def test_appends_log(mock_chat):
     result = model_routing_node(_state(
         "supervised", "classification",
         {"linearity_score": 0.6, "sample_size": 200, "feature_count": 3},
-        [], ""
     ))
     assert any("[model_routing]" in log for log in result["logs"])

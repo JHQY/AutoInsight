@@ -27,6 +27,7 @@ Selection guidelines (use modeling_hints to decide):
 - sample_size < 500       → avoid XGB/LGBM; prefer simpler models
 - sample_size > 50000     → prefer LGBM (fastest)
 - feature_count > 50      → prefer Lasso (sparse) or tree-based
+- outlier_ratio > 0.05  → confirm anomaly_detection; prefer IsolationForest or LocalOutlierFactor
 - For clustering: KMeans if data is likely spherical; DBSCAN if density-based clusters expected
 - For anomaly_detection: IsolationForest is default; use LOF for local density anomalies
 - Select 2-3 algorithms (or 0 for correlation_analysis)
