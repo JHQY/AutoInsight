@@ -152,6 +152,28 @@ def test_evaluation_correlation_analysis_returns_empty():
     assert result["best_model"] == ""
 
 
+def test_evaluation_dbscan_uses_x_fit():
+    """DBSCAN labels come from X_train (stored as X_fit); evaluation must use X_fit not X_test."""
+    import numpy as np
+    n_train = 80
+    X_train = pd.DataFrame(np.random.randn(n_train, 2), columns=["a", "b"])
+    X_test  = pd.DataFrame(np.random.randn(20, 2), columns=["a", "b"])
+    labels  = [0] * 40 + [1] * 40   # train-length labels, two clusters
+    model_results = {
+        "DBSCAN": {"labels": labels, "model": None, "X_fit": X_train}
+    }
+    state = {
+        "model_results": model_results,
+        "X_test": X_test,
+        "y_test": None,
+        "task_type": "clustering",
+        "logs": [],
+    }
+    result = evaluation_node(state)   # would ValueError without X_fit fix
+    assert "DBSCAN" in result["metrics"]
+    assert "silhouette" in result["metrics"]["DBSCAN"]
+
+
 def test_evaluation_anomaly_appends_log():
     import numpy as np
     X_test = pd.DataFrame(np.random.randn(10, 2), columns=["a", "b"])

@@ -39,7 +39,9 @@ def evaluation_node(state: AgentState) -> dict:
         elif task_type == "regression":
             metrics[algo_name] = compute_regression_metrics(y_true, result["y_pred"])
         elif task_type == "clustering":
-            metrics[algo_name] = compute_clustering_metrics(X_arr, result["labels"])
+            # DBSCAN labels come from X_train (stored as X_fit); others use X_test
+            X_eval = np.asarray(result["X_fit"]) if "X_fit" in result else X_arr
+            metrics[algo_name] = compute_clustering_metrics(X_eval, result["labels"])
         elif task_type == "anomaly_detection":
             contamination = 0.05
             model_obj = result.get("model")

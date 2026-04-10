@@ -57,9 +57,10 @@ def _fit_unsupervised(algo_name, X_train, X_test, task_type):
     model = get_model(algo_name)
 
     if algo_name in _DBSCAN_LIKE:
-        # DBSCAN has no predict() — fit_predict on X_train directly
+        # DBSCAN has no predict() — fit_predict on X_train directly.
+        # We store X_fit so evaluation can use the matching X array.
         labels = model.fit_predict(X_train).tolist()
-        return {"labels": labels, "model": model}
+        return {"labels": labels, "model": model, "X_fit": X_train}
 
     model.fit(X_train)
     preds = model.predict(X_test).tolist()  # clustering: cluster id; anomaly: 1/-1
