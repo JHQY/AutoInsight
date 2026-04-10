@@ -20,74 +20,91 @@ def run_eda(state: AgentState) -> AgentState:
     updated_state.setdefault("quality_issues", [])
     updated_state.setdefault("logs", [])
 
+    # ── Step 1: 数据加载与 modeling_hints（必须成功，否则提前返回） ──────
     try:
         data = _build_eda_dataframe(updated_state)
         target_column = updated_state.get("target_column", "")
         if not target_column or target_column not in data.columns:
             raise ValueError("target_column 缺失或不在 EDA 数据中")
-
-        chart_dir = _ensure_chart_dir()
-        chart_paths: List[str] = []
-
-        # 1) 目标分布图
-        dist_path = _plot_target_distribution(data, target_column, chart_dir)
-        if dist_path:
-            chart_paths.append(dist_path)
-
-        # 2) 相关性热力图（仅数值列）
-        corr_path = _plot_correlation_heatmap(data, target_column, chart_dir)
-        if corr_path:
-            chart_paths.append(corr_path)
-
-        # 3) Top3 特征与目标关系图
-        top3_features, top3_corr = _top3_correlations(data, target_column)
-        rel_paths = _plot_feature_target_relations(data, target_column, top3_features, chart_dir)
-        chart_paths.extend(rel_paths)
-
-        # 4) 目标的分层均值（选一个低基数类别列）
-        layer_desc = _build_layer_desc(data, target_column)
-
-        # 5) 目标异常值
-        abnormal_desc, abnormal_issue = _detect_target_outliers(data, target_column)
-        if abnormal_issue:
-            updated_state["quality_issues"].append(abnormal_issue)
-
-        # 6) 目标分布描述
-        distribution_desc = _build_distribution_desc(data[target_column], target_column)
-
-        # 回填 eda_summary
-        f1, f2, f3 = (top3_features + ["", "", ""])[:3]
-        c1, c2, c3 = (top3_corr + [0.0, 0.0, 0.0])[:3]
-        updated_state["eda_summary"] = {
-            "top3_features": ",".join(top3_features),
-            "distribution_desc": distribution_desc,
-            "layer_desc": layer_desc,
-            "abnormal_desc": abnormal_desc,
-            "feature_1": f1,
-            "feature_2": f2,
-            "feature_3": f3,
-            "feature_1_corr": float(c1),
-            "feature_2_corr": float(c2),
-            "feature_3_corr": float(c3),
-        }
-
-        updated_state["charts"].extend(chart_paths)
-
-        # Compute modeling hints
-        modeling_hints = _compute_modeling_hints(
+        updated_state["modeling_hints"] = _compute_modeling_hints(
             data,
             target_column,
             updated_state.get("task_category", "supervised"),
             updated_state.get("y_train"),
         )
-        updated_state["modeling_hints"] = modeling_hints
-
-        updated_state["logs"].append("[EDA] EDA 分析完成，已生成图表与洞察摘要")
-        return updated_state
     except Exception as exc:
-        updated_state["logs"].append(f"[EDA] EDA 分析失败: {exc}")
+        updated_state["logs"].append(f"[EDA] 数据加载失败: {exc}")
         updated_state["modeling_hints"] = {}
         return updated_state
+
+    # ── Step 2: 图表生成（各步独立隔离，失败只记日志不中断） ────────────
+    chart_dir = _ensure_chart_dir()
+    chart_paths: List[str] = []
+    top3_features: List[str] = []
+    top3_corr: List[float] = []
+
+    try:
+        dist_path = _plot_target_distribution(data, target_column, chart_dir)
+        if dist_path:
+            chart_paths.append(dist_path)
+    except Exception as exc:
+        updated_state["logs"].append(f"[EDA] 目标分布图生成失败: {exc}")
+
+    try:
+        corr_path = _plot_correlation_heatmap(data, target_column, chart_dir)
+        if corr_path:
+            chart_paths.append(corr_path)
+    except Exception as exc:
+        updated_state["logs"].append(f"[EDA] 相关性热力图生成失败: {exc}")
+
+    try:
+        top3_features, top3_corr = _top3_correlations(data, target_column)
+        rel_paths = _plot_feature_target_relations(data, target_column, top3_features, chart_dir)
+        chart_paths.extend(rel_paths)
+    except Exception as exc:
+        updated_state["logs"].append(f"[EDA] Top3特征图生成失败: {exc}")
+
+    updated_state["charts"].extend(chart_paths)
+
+    # ── Step 3: 文字摘要（各步独立隔离） ───────────────────────────────
+    layer_desc = ""
+    abnormal_desc = ""
+    distribution_desc = ""
+
+    try:
+        layer_desc = _build_layer_desc(data, target_column)
+    except Exception as exc:
+        updated_state["logs"].append(f"[EDA] 分层描述生成失败: {exc}")
+
+    try:
+        abnormal_desc, abnormal_issue = _detect_target_outliers(data, target_column)
+        if abnormal_issue:
+            updated_state["quality_issues"].append(abnormal_issue)
+    except Exception as exc:
+        updated_state["logs"].append(f"[EDA] 异常值检测失败: {exc}")
+
+    try:
+        distribution_desc = _build_distribution_desc(data[target_column], target_column)
+    except Exception as exc:
+        updated_state["logs"].append(f"[EDA] 分布描述生成失败: {exc}")
+
+    f1, f2, f3 = (top3_features + ["", "", ""])[:3]
+    c1, c2, c3 = (top3_corr + [0.0, 0.0, 0.0])[:3]
+    updated_state["eda_summary"] = {
+        "top3_features": ",".join(top3_features),
+        "distribution_desc": distribution_desc,
+        "layer_desc": layer_desc,
+        "abnormal_desc": abnormal_desc,
+        "feature_1": f1,
+        "feature_2": f2,
+        "feature_3": f3,
+        "feature_1_corr": float(c1),
+        "feature_2_corr": float(c2),
+        "feature_3_corr": float(c3),
+    }
+
+    updated_state["logs"].append("[EDA] EDA 分析完成，已生成图表与洞察摘要")
+    return updated_state
 
 
 def _build_eda_dataframe(state: AgentState) -> pd.DataFrame:
@@ -129,13 +146,15 @@ def _plot_target_distribution(data: pd.DataFrame, target_column: str, chart_dir:
 
     path = os.path.join(chart_dir, f"target_distribution_{target_column}.png")
     plt.figure(figsize=(8, 5))
-    sns.histplot(series, kde=True, bins=30)
-    plt.title(f"Target Distribution: {target_column}")
-    plt.xlabel(target_column)
-    plt.ylabel("Count")
-    plt.tight_layout()
-    plt.savefig(path, dpi=150)
-    plt.close()
+    try:
+        sns.histplot(series, kde=True, bins=30)
+        plt.title(f"Target Distribution: {target_column}")
+        plt.xlabel(target_column)
+        plt.ylabel("Count")
+        plt.tight_layout()
+        plt.savefig(path, dpi=150)
+    finally:
+        plt.close()
     return path
 
 
@@ -148,11 +167,13 @@ def _plot_correlation_heatmap(data: pd.DataFrame, target_column: str, chart_dir:
     path = os.path.join(chart_dir, "correlation_heatmap.png")
 
     plt.figure(figsize=(10, 8))
-    sns.heatmap(corr, cmap="coolwarm", center=0)
-    plt.title("Correlation Heatmap")
-    plt.tight_layout()
-    plt.savefig(path, dpi=150)
-    plt.close()
+    try:
+        sns.heatmap(corr, cmap="coolwarm", center=0)
+        plt.title("Correlation Heatmap")
+        plt.tight_layout()
+        plt.savefig(path, dpi=150)
+    finally:
+        plt.close()
     return path
 
 
@@ -187,11 +208,13 @@ def _plot_feature_target_relations(
 
         path = os.path.join(chart_dir, f"feature_target_{feature}.png")
         plt.figure(figsize=(7, 5))
-        sns.scatterplot(data=plot_data, x=feature, y=target_column, s=20, alpha=0.7)
-        plt.title(f"{feature} vs {target_column}")
-        plt.tight_layout()
-        plt.savefig(path, dpi=150)
-        plt.close()
+        try:
+            sns.scatterplot(data=plot_data, x=feature, y=target_column, s=20, alpha=0.7)
+            plt.title(f"{feature} vs {target_column}")
+            plt.tight_layout()
+            plt.savefig(path, dpi=150)
+        finally:
+            plt.close()
         paths.append(path)
     return paths
 
