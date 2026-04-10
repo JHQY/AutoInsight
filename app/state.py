@@ -20,22 +20,22 @@ class ModelingHints(TypedDict, total=False):
     linearity_score: float   # 0~1，特征与目标的整体线性相关度
     imbalance_ratio: float   # 少数类占比（仅分类任务有意义）
     outlier_ratio: float     # 目标列异常值占比
-    high_corr_pairs: list    # 高共线性特征对列表，如 ["age-income"]
+    high_corr_pairs: list[str]    # 高共线性特征对列表，如 ["age-income"]
     sample_size: int         # 训练集样本数
     feature_count: int       # 特征列数
 
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
 
     # ── 入口字段（由 main.py 初始化）────────────────────────────────
     user_query:           str
     file_path:            str
-    target_column:        str        # 可为空字符串；intent_routing 会推断并回写
+    target_column:        str        # empty string until inferred by intent_routing
     user_level:           str        # "general" | "expert"，默认 "general"
 
     # ── Profiling ────────────────────────────────────────────────────
     schema:               dict
-    quality_issues:       list
+    quality_issues:       list[str]
 
     # ── Intent Routing ───────────────────────────────────────────────
     task_category:        str        # "supervised" | "unsupervised" | "analytical"
@@ -47,15 +47,15 @@ class AgentState(TypedDict):
     X_test:               pd.DataFrame
     y_train:              Optional[pd.DataFrame]   # 无监督任务为 None
     y_test:               Optional[pd.DataFrame]   # 无监督任务为 None
-    feature_names:        list
+    feature_names:        list[str]
 
     # ── EDA ──────────────────────────────────────────────────────────
-    charts:               list
+    charts:               list[str]
     eda_summary:          EDASummary
     modeling_hints:       ModelingHints
 
     # ── Model Routing ────────────────────────────────────────────────
-    selected_algorithms:  list
+    selected_algorithms:  list[str]
     reasoning:            str
 
     # ── Modeling ─────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ class AgentState(TypedDict):
     report_path:          str
 
     # ── 全局 ─────────────────────────────────────────────────────────
-    logs:                 list
+    logs:                 list[str]
 
 
 class ReportData(TypedDict, total=False):
