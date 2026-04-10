@@ -107,6 +107,8 @@ class ReportData(TypedDict, total=False):
     davies_bouldin:       float
     anomaly_ratio:        float
     best_model:           str
+    modeling_hints:       dict
+    all_metrics:          dict
     user_intent_summary:  str
     reasoning:            str
     conclusion_1:         str
