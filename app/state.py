@@ -70,6 +70,7 @@ class AgentState(TypedDict, total=False):
 
     # ── 全局 ─────────────────────────────────────────────────────────
     logs:                 list[str]
+    tune:                 bool
 
 
 class ReportData(TypedDict, total=False):
