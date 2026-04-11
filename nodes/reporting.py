@@ -1,157 +1,579 @@
 import os
 import json
 from datetime import datetime
+
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from openai import OpenAI
 from app.state import AgentState, ReportData
 
 
 _PROMPT_PATH = os.path.join(os.path.dirname(__file__), "..", "prompts", "report_prompt.txt")
+_CHART_DIR   = os.path.join(os.path.dirname(__file__), "..", "outputs", "charts")
 
 
-def _load_template(user_level: str) -> str:
-    with open(_PROMPT_PATH, "r", encoding="utf-8") as f:
-        content = f.read()
-    if user_level == "expert":
-        marker = "=== EXPERT TEMPLATE ==="
-    else:
-        marker = "=== GENERAL TEMPLATE ==="
-    idx = content.find(marker)
-    if idx == -1:
-        return content
-    next_marker = content.find("===", idx + len(marker))
-    if next_marker == -1 or user_level == "expert":
-        return content[idx + len(marker):].strip()
-    return content[idx + len(marker):next_marker].strip()
+# ── Entry point ──────────────────────────────────────────────────────────────
 
-
-def generate_report(state: AgentState) -> AgentState:
+def generate_report(state: AgentState) -> dict:
     try:
-        user_level  = state.get("user_level", "general")
-        report_data = build_report_data(state)
-        template    = _load_template(user_level)
-        content     = _call_llm(template, report_data)
-        report_path = _save_report(content)
+        # 1. 生成模型专属图表
+        model_charts = _generate_model_charts(state)
+        all_charts   = list(state.get("charts", [])) + model_charts
 
-        updated = state.copy()
-        updated["report_path"] = report_path
-        updated["logs"] = list(state.get("logs", [])) + ["[reporting] 报告生成完成"]
-        return updated
-    except Exception as e:
-        updated = state.copy()
-        updated["logs"] = list(state.get("logs", [])) + [f"[reporting] 报告生成失败: {e}"]
-        return updated
+        # 2. LLM 生成叙事段落（JSON 格式）
+        narrative = _call_llm_narrative(state)
 
+        # 3. 程序化组装最终报告
+        content     = _assemble_report(state, all_charts, narrative)
+        report_path = _save_report(content, state.get("file_path", ""))
 
-def build_report_data(state: AgentState) -> ReportData:
-    schema = state.get("schema", {})
-    meta = schema.get("_meta", {})
-    eda_summary = state.get("eda_summary", {})
-    metrics = state.get("metrics", {})
-    best_model = state.get("best_model", "")
-    task_type = state.get("task_type", "")
-
-    report_data: ReportData = {
-        "timestamp":    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "file_name":    os.path.basename(state.get("file_path", "")),
-        "target_column": state.get("target_column", ""),
-        "task_type":    task_type,
-        "user_level":   state.get("user_level", "general"),
-        "user_intent_summary": state.get("user_intent_summary", ""),
-        "reasoning":    state.get("reasoning", ""),
-
-        # Dataset overview
-        "data_scope":   meta.get("data_scope", ""),
-        "row_count":    meta.get("row_count", 0),
-        "col_count":    meta.get("col_count", 0),
-        "core_features": ",".join((state.get("feature_names", []) or [])[:5]),
-        "unit":         meta.get("unit", ""),
-        "mean_target":  meta.get("mean_target", 0.0),
-
-        # Quality
-        "quality_issues": ";".join(state.get("quality_issues", [])),
-
-        # EDA
-        "top3_features":    eda_summary.get("top3_features", ""),
-        "distribution_desc": eda_summary.get("distribution_desc", ""),
-        "layer_desc":       eda_summary.get("layer_desc", ""),
-        "abnormal_desc":    eda_summary.get("abnormal_desc", ""),
-        "key_charts":       ";".join(state.get("charts", [])),
-        "feature_1":        eda_summary.get("feature_1", ""),
-        "feature_2":        eda_summary.get("feature_2", ""),
-        "feature_3":        eda_summary.get("feature_3", ""),
-        "feature_1_corr":   float(eda_summary.get("feature_1_corr", 0.0)),
-        "feature_2_corr":   float(eda_summary.get("feature_2_corr", 0.0)),
-        "feature_3_corr":   float(eda_summary.get("feature_3_corr", 0.0)),
-
-        # Modeling hints (for expert report)
-        "modeling_hints":   state.get("modeling_hints", {}),
-
-        # All model metrics (for expert report comparison table)
-        "all_metrics":      metrics,
-
-        # Best model metrics
-        "best_model":       best_model,
-        "accuracy":  0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0,
-        "mae":       0.0, "rmse":      0.0,  "r2":    0.0,
-        "silhouette":        0.0,
-        "anomaly_ratio":     0.0,
-
-        # Defaults
-        "business_context":     "本次分析基于业务数据，旨在挖掘影响核心指标的关键因素",
-        "feature_relation_desc": "",
-        "model_value":          "",
-        "conclusion_1": "", "conclusion_2": "", "conclusion_3": "",
-        "short_suggest_1": "", "short_suggest_2": "",
-        "long_suggest_1": "",  "long_suggest_2": "",
-        "data_risk":  "数据可能存在局限性，结论需结合业务经验验证。",
-        "exec_risk":  "模型预测结果仅作参考，实际执行需综合考量。",
-    }
-
-    # Fill best model metrics
-    if best_model and best_model in metrics:
-        m = metrics[best_model]
-        if task_type == "classification":
-            report_data["accuracy"]  = m.get("accuracy", 0.0)
-            report_data["precision"] = m.get("precision", 0.0)
-            report_data["recall"]    = m.get("recall", 0.0)
-            report_data["f1"]        = m.get("f1", 0.0)
-        elif task_type == "regression":
-            report_data["mae"]  = m.get("mae", 0.0)
-            report_data["rmse"] = m.get("rmse", 0.0)
-            report_data["r2"]   = m.get("r2", 0.0)
-        elif task_type == "clustering":
-            report_data["silhouette"] = m.get("silhouette", 0.0)
-        elif task_type == "anomaly_detection":
-            report_data["anomaly_ratio"] = m.get("anomaly_ratio", 0.0)
-
-    return report_data
+        return {
+            "report_path": report_path,
+            "charts":      all_charts,
+            "logs": list(state.get("logs", [])) + ["[reporting] 报告生成完成"],
+        }
+    except Exception as exc:
+        return {
+            "logs": list(state.get("logs", [])) + [f"[reporting] 报告生成失败: {exc}"],
+        }
 
 
-def _call_llm(template: str, report_data: ReportData) -> str:
+# ── Model chart generation ────────────────────────────────────────────────────
+
+def _generate_model_charts(state: AgentState) -> list:
+    """Generate model-specific visualizations; return list of saved paths."""
+    os.makedirs(_CHART_DIR, exist_ok=True)
+    task_type    = state.get("task_type", "")
+    model_results = state.get("model_results", {})
+    best_model   = state.get("best_model", "")
+    paths        = []
+
+    if not model_results or not best_model:
+        return paths
+
+    best = model_results.get(best_model, {})
+    fitted_model = best.get("model")
+    predictions  = best.get("predictions")
+    feature_names = state.get("feature_names", [])
+    y_test = state.get("y_test")
+
+    # ── Feature importance (tree-based models) ────────────────────────────
+    if fitted_model is not None and hasattr(fitted_model, "feature_importances_"):
+        try:
+            importances = fitted_model.feature_importances_
+            names = feature_names if feature_names else [f"f{i}" for i in range(len(importances))]
+            idx   = np.argsort(importances)[::-1][:15]  # top 15
+
+            fig, ax = plt.subplots(figsize=(8, max(4, len(idx) * 0.4)))
+            try:
+                ax.barh([names[i] for i in reversed(idx)],
+                        [importances[i] for i in reversed(idx)],
+                        color="steelblue")
+                ax.set_xlabel("Feature Importance")
+                ax.set_title(f"Feature Importance — {best_model}")
+                plt.tight_layout()
+                path = os.path.join(_CHART_DIR, "model_feature_importance.png")
+                plt.savefig(path, dpi=150)
+                paths.append(path)
+            finally:
+                plt.close(fig)
+        except Exception:
+            pass
+
+    # ── Regression: prediction vs actual + residuals ──────────────────────
+    if task_type == "regression" and predictions is not None and y_test is not None:
+        try:
+            import pandas as pd
+            y_true = y_test.values.ravel() if hasattr(y_test, "values") else np.array(y_test).ravel()
+            y_pred = np.array(predictions).ravel()
+            mask   = np.isfinite(y_true) & np.isfinite(y_pred)
+            y_true, y_pred = y_true[mask], y_pred[mask]
+
+            fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+            try:
+                # Pred vs Actual
+                axes[0].scatter(y_true, y_pred, alpha=0.3, s=10, color="steelblue")
+                mn, mx = min(y_true.min(), y_pred.min()), max(y_true.max(), y_pred.max())
+                axes[0].plot([mn, mx], [mn, mx], "r--", linewidth=1.5, label="Perfect fit")
+                axes[0].set_xlabel("Actual")
+                axes[0].set_ylabel("Predicted")
+                axes[0].set_title(f"Predicted vs Actual — {best_model}")
+                axes[0].legend()
+
+                # Residuals
+                residuals = y_pred - y_true
+                axes[1].scatter(y_pred, residuals, alpha=0.3, s=10, color="coral")
+                axes[1].axhline(0, color="black", linewidth=1)
+                axes[1].set_xlabel("Predicted")
+                axes[1].set_ylabel("Residual")
+                axes[1].set_title("Residual Plot")
+
+                plt.tight_layout()
+                path = os.path.join(_CHART_DIR, "model_regression_diagnosis.png")
+                plt.savefig(path, dpi=150)
+                paths.append(path)
+            finally:
+                plt.close(fig)
+        except Exception:
+            pass
+
+    # ── Classification: confusion matrix ─────────────────────────────────
+    if task_type == "classification" and predictions is not None and y_test is not None:
+        try:
+            from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+            y_true = y_test.values.ravel() if hasattr(y_test, "values") else np.array(y_test).ravel()
+            y_pred = np.array(predictions).ravel()
+            cm     = confusion_matrix(y_true, y_pred)
+            labels = sorted(set(y_true))
+
+            fig, ax = plt.subplots(figsize=(max(5, len(labels)), max(4, len(labels))))
+            try:
+                disp = ConfusionMatrixDisplay(cm, display_labels=labels)
+                disp.plot(ax=ax, colorbar=False, cmap="Blues")
+                ax.set_title(f"Confusion Matrix — {best_model}")
+                plt.tight_layout()
+                path = os.path.join(_CHART_DIR, "model_confusion_matrix.png")
+                plt.savefig(path, dpi=150)
+                paths.append(path)
+            finally:
+                plt.close(fig)
+        except Exception:
+            pass
+
+    # ── Clustering: PCA 2D visualization ─────────────────────────────────
+    if task_type == "clustering" and predictions is not None:
+        try:
+            from sklearn.decomposition import PCA
+            X_test = state.get("X_test")
+            if X_test is not None:
+                X_arr  = X_test.values if hasattr(X_test, "values") else np.array(X_test)
+                labels = np.array(predictions).ravel()
+                pca    = PCA(n_components=2)
+                X_2d   = pca.fit_transform(X_arr)
+
+                fig, ax = plt.subplots(figsize=(7, 6))
+                try:
+                    scatter = ax.scatter(X_2d[:, 0], X_2d[:, 1], c=labels,
+                                         cmap="tab10", alpha=0.6, s=20)
+                    plt.colorbar(scatter, ax=ax, label="Cluster")
+                    ax.set_xlabel("PC1")
+                    ax.set_ylabel("PC2")
+                    ax.set_title(f"Cluster Visualization (PCA 2D) — {best_model}")
+                    plt.tight_layout()
+                    path = os.path.join(_CHART_DIR, "model_cluster_pca.png")
+                    plt.savefig(path, dpi=150)
+                    paths.append(path)
+                finally:
+                    plt.close(fig)
+        except Exception:
+            pass
+
+    # ── Anomaly: score distribution ───────────────────────────────────────
+    if task_type == "anomaly_detection" and predictions is not None:
+        try:
+            preds  = np.array(predictions).ravel()
+            n_anom = int((preds == -1).sum())
+            n_norm = int((preds == 1).sum())
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            try:
+                ax.bar(["Normal", "Anomaly"], [n_norm, n_anom],
+                       color=["steelblue", "tomato"])
+                ax.set_title(f"Anomaly Detection Results — {best_model}")
+                ax.set_ylabel("Count")
+                for i, v in enumerate([n_norm, n_anom]):
+                    ax.text(i, v + max(n_norm, n_anom) * 0.01, str(v), ha="center")
+                plt.tight_layout()
+                path = os.path.join(_CHART_DIR, "model_anomaly_distribution.png")
+                plt.savefig(path, dpi=150)
+                paths.append(path)
+            finally:
+                plt.close(fig)
+        except Exception:
+            pass
+
+    # ── All models: metric comparison bar chart ───────────────────────────
+    metrics   = state.get("metrics", {})
+    metric_key = {
+        "regression":       "r2",
+        "classification":   "f1",
+        "clustering":       "silhouette",
+        "anomaly_detection": "anomaly_ratio",
+    }.get(task_type)
+
+    if metric_key and len(metrics) > 1:
+        try:
+            names  = [m for m in metrics if metric_key in metrics[m]]
+            values = [metrics[m][metric_key] for m in names]
+            colors = ["tomato" if n == best_model else "steelblue" for n in names]
+
+            fig, ax = plt.subplots(figsize=(7, 4))
+            try:
+                bars = ax.bar(names, values, color=colors)
+                ax.set_title(f"Model Comparison — {metric_key.upper()}")
+                ax.set_ylabel(metric_key.upper())
+                for bar, val in zip(bars, values):
+                    ax.text(bar.get_x() + bar.get_width() / 2,
+                            bar.get_height() + max(values) * 0.01,
+                            f"{val:.3f}", ha="center", fontsize=9)
+                plt.xticks(rotation=15, ha="right")
+                plt.tight_layout()
+                path = os.path.join(_CHART_DIR, "model_comparison.png")
+                plt.savefig(path, dpi=150)
+                paths.append(path)
+            finally:
+                plt.close(fig)
+        except Exception:
+            pass
+
+    return paths
+
+
+# ── LLM narrative (JSON sections only) ───────────────────────────────────────
+
+def _call_llm_narrative(state: AgentState) -> dict:
+    """Ask LLM to return narrative sections as JSON. Falls back to empty strings."""
+    user_level   = state.get("user_level", "general")
+    task_type    = state.get("task_type", "")
+    eda_summary  = state.get("eda_summary", {})
+    metrics      = state.get("metrics", {})
+    best_model   = state.get("best_model", "")
+    reasoning    = state.get("reasoning", "")
+
+    best_metrics = metrics.get(best_model, {}) if best_model else {}
+    metrics_str  = json.dumps(
+        {m: {k: round(v, 4) for k, v in mv.items() if isinstance(v, float)}
+         for m, mv in metrics.items() if isinstance(mv, dict) and "error" not in mv},
+        ensure_ascii=False, indent=2
+    )
+
+    if user_level == "expert":
+        section_spec = """Return a JSON object with these keys:
+- "eda_narrative": technical EDA findings (2-3 paragraphs, Chinese)
+- "model_rationale": explain the algorithm selection reasoning (1-2 paragraphs, Chinese)
+- "model_analysis": interpret the best model's metrics technically (1-2 paragraphs, Chinese)
+- "conclusions": data-driven conclusions with specific numbers (bullet points, Chinese)
+- "recommendations": actionable technical recommendations (bullet points, Chinese)
+- "risks": technical risks and limitations (bullet points, Chinese)"""
+    else:
+        section_spec = """Return a JSON object with these keys:
+- "eda_narrative": explain EDA findings in plain language without jargon (2-3 paragraphs, Chinese)
+- "model_rationale": explain in simple terms why these models were chosen (1 paragraph, Chinese)
+- "model_analysis": translate model performance into business meaning, no metric numbers (1-2 paragraphs, Chinese)
+- "conclusions": 2-3 plain-language business conclusions (bullet points, Chinese)
+- "recommendations": 3-5 specific action items (short-term 1-3 months + long-term 3-12 months, Chinese)
+- "risks": 2-3 plain-language risk warnings (bullet points, Chinese)"""
+
+    prompt = f"""You are a data analysis report writer.
+
+Task type: {task_type}
+User intent: {state.get("user_intent_summary", "")}
+Model selection reasoning: {reasoning}
+
+EDA summary:
+- Top 3 features: {eda_summary.get("top3_features", "")}
+- Distribution: {eda_summary.get("distribution_desc", "")}
+- Layer analysis: {eda_summary.get("layer_desc", "")}
+- Outliers: {eda_summary.get("abnormal_desc", "")}
+
+Model results (all candidates):
+{metrics_str}
+
+Best model: {best_model}
+Best model metrics: {json.dumps({k: round(v, 4) for k, v in best_metrics.items() if isinstance(v, float)}, ensure_ascii=False)}
+
+{section_spec}
+
+IMPORTANT: Return ONLY valid JSON. No markdown code fences, no extra text."""
+
     client = OpenAI(
         api_key=os.environ.get("DEEPSEEK_API_KEY"),
         base_url="https://api.deepseek.com",
     )
-    data_json = {
-        k: v for k, v in report_data.items()
-        if v not in (None, "", 0, 0.0, []) and k not in ("X_train", "X_test", "y_train", "y_test")
-    }
-    user_msg = (
-        f"{template}\n\n---\n"
-        f"以下是分析数据：\n```json\n{json.dumps(data_json, ensure_ascii=False, indent=2)}\n```"
-    )
     response = client.chat.completions.create(
         model="deepseek-chat",
-        max_tokens=4096,
-        messages=[{"role": "user", "content": user_msg}],
+        max_tokens=3000,
+        temperature=0.3,
+        messages=[{"role": "user", "content": prompt}],
     )
-    return response.choices[0].message.content
+    raw = response.choices[0].message.content.strip()
+
+    # Strip markdown fences if present
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+        raw = raw.rsplit("```", 1)[0].strip()
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {k: "" for k in ["eda_narrative", "model_rationale",
+                                  "model_analysis", "conclusions",
+                                  "recommendations", "risks"]}
 
 
-def _save_report(content: str) -> str:
+# ── Report assembly ───────────────────────────────────────────────────────────
+
+def _rel_path(abs_path: str, report_dir: str) -> str:
+    """Return path relative to report file for markdown image embedding."""
+    try:
+        return os.path.relpath(abs_path, report_dir).replace("\\", "/")
+    except ValueError:
+        return abs_path.replace("\\", "/")
+
+
+def _embed_charts(paths: list, report_dir: str, captions: dict = None) -> str:
+    captions = captions or {}
+    lines = []
+    for p in paths:
+        if p and os.path.exists(p):
+            name    = os.path.basename(p).replace(".png", "").replace("_", " ").title()
+            caption = captions.get(os.path.basename(p), name)
+            rel     = _rel_path(p, report_dir)
+            lines.append(f"![{caption}]({rel})\n*{caption}*\n")
+    return "\n".join(lines)
+
+
+def _metrics_table(metrics: dict, task_type: str, best_model: str) -> str:
+    if not metrics:
+        return ""
+
+    metric_cols = {
+        "classification":   ["accuracy", "precision", "recall", "f1"],
+        "regression":       ["mae", "rmse", "r2"],
+        "clustering":       ["silhouette", "davies_bouldin"],
+        "anomaly_detection": ["anomaly_ratio"],
+    }.get(task_type, [])
+
+    valid = {m: v for m, v in metrics.items()
+             if isinstance(v, dict) and "error" not in v}
+    if not valid or not metric_cols:
+        return ""
+
+    actual_cols = [c for c in metric_cols
+                   if any(c in v for v in valid.values())]
+    if not actual_cols:
+        return ""
+
+    header = "| 模型 | " + " | ".join(c.upper() for c in actual_cols) + " |"
+    sep    = "|---|" + "---|" * len(actual_cols)
+    rows   = []
+    for model, mv in valid.items():
+        mark = " ✓" if model == best_model else ""
+        vals = " | ".join(
+            f"{mv.get(c, '-'):.4f}" if isinstance(mv.get(c), float) else str(mv.get(c, "-"))
+            for c in actual_cols
+        )
+        rows.append(f"| **{model}{mark}** | {vals} |")
+
+    return "\n".join([header, sep] + rows)
+
+
+def _narr(narrative: dict, key: str) -> str:
+    """Safely extract narrative section as string regardless of LLM return type."""
+    val = narrative.get(key, "")
+    if isinstance(val, list):
+        return "\n".join(str(v) for v in val)
+    return str(val) if val else ""
+
+
+def _assemble_report(state: AgentState, all_charts: list, narrative: dict) -> str:
+    schema       = state.get("schema", {})
+    meta         = schema.get("_meta", {})
+    task_type    = state.get("task_type", "")
+    best_model   = state.get("best_model", "")
+    metrics      = state.get("metrics", {})
+    eda_summary  = state.get("eda_summary", {})
+    quality      = state.get("quality_issues", [])
+    features     = state.get("feature_names", [])
+    user_level   = state.get("user_level", "general")
+    reasoning    = state.get("reasoning", "")
+    selected_alg = state.get("selected_algorithms", [])
+    hints        = state.get("modeling_hints", {})
+
+    report_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "outputs", "reports")
+    )
+
+    # Categorise charts
+    eda_charts   = [p for p in all_charts if p and "feature_importance" not in p
+                    and "model_" not in os.path.basename(p)]
+    model_charts = [p for p in all_charts if p and "model_" in os.path.basename(p)]
+
+    chart_captions = {
+        "target_distribution_median_house_value.png": "目标变量分布",
+        "correlation_heatmap.png": "特征相关性热力图",
+        "feature_target_a.png": "特征与目标关系",
+        "model_feature_importance.png": "特征重要性排名",
+        "model_regression_diagnosis.png": "预测 vs 实际 & 残差分析",
+        "model_confusion_matrix.png": "混淆矩阵",
+        "model_cluster_pca.png": "聚类可视化（PCA降维）",
+        "model_anomaly_distribution.png": "异常检测结果分布",
+        "model_comparison.png": "候选模型性能对比",
+    }
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    level_tag  = "通用报告" if user_level == "general" else "专家报告"
+
+    lines = []
+
+    # ── Header ────────────────────────────────────────────────────────────
+    lines += [
+        f"# AutoInsight 分析报告",
+        f"",
+        f"> **生成时间:** {timestamp} | "
+        f"**数据集:** {os.path.basename(state.get('file_path', ''))} | "
+        f"**任务类型:** {task_type} | "
+        f"**报告等级:** {level_tag}",
+        f"",
+        f"**用户诉求:** {state.get('user_intent_summary', '')}",
+        f"",
+        "---",
+    ]
+
+    # ── Section 1: Dataset Overview ───────────────────────────────────────
+    lines += [
+        "", "## 一、数据概览", "",
+        "| 指标 | 值 |",
+        "|---|---|",
+        f"| 数据集 | {os.path.basename(state.get('file_path', ''))} |",
+        f"| 行数 | {meta.get('row_count', '-'):,} |",
+        f"| 列数 | {meta.get('col_count', '-')} |",
+        f"| 目标列 | `{state.get('target_column', '-')}` |",
+        f"| 任务类型 | {task_type} |",
+        f"| 特征列数 | {len(features)} |",
+        "",
+    ]
+    if quality:
+        lines += ["**数据质量问题：**", ""]
+        for q in quality:
+            lines.append(f"- {q}")
+        lines.append("")
+
+    if user_level == "expert" and hints:
+        lines += ["**EDA Modeling Hints：**", ""]
+        for k, v in hints.items():
+            lines.append(f"- {k}: `{v}`")
+        lines.append("")
+
+    # ── Section 2: EDA ────────────────────────────────────────────────────
+    lines += ["---", "", "## 二、探索性数据分析（EDA）", ""]
+
+    if eda_charts:
+        lines += ["### 关键图表", ""]
+        lines.append(_embed_charts(eda_charts, report_dir, chart_captions))
+
+    if eda_summary.get("top3_features"):
+        lines += [
+            "### 关键特征",
+            "",
+            "| 排名 | 特征 | 与目标相关系数 |",
+            "|---|---|---|",
+        ]
+        for i, feat_key in enumerate(["feature_1", "feature_2", "feature_3"], 1):
+            feat = eda_summary.get(feat_key, "")
+            corr = eda_summary.get(f"feature_{i}_corr", 0.0)
+            if feat:
+                lines.append(f"| {i} | `{feat}` | {corr:.4f} |")
+        lines.append("")
+
+    eda_narr = _narr(narrative, "eda_narrative")
+    if eda_narr:
+        lines += ["### 数据洞察", "", eda_narr, ""]
+
+    # ── Section 3: Model Selection & Training ─────────────────────────────
+    lines += ["---", "", "## 三、模型选择与训练", ""]
+
+    if selected_alg:
+        lines += [
+            f"**候选算法：** {', '.join(selected_alg)}",
+            "",
+            f"**选择依据：** {reasoning}",
+            "",
+        ]
+
+    model_rationale = _narr(narrative, "model_rationale")
+    if model_rationale:
+        lines += [model_rationale, ""]
+
+    # Model comparison table
+    table = _metrics_table(metrics, task_type, best_model)
+    if table:
+        lines += ["### 候选模型对比", "", table, ""]
+
+    # Model comparison chart
+    comp_chart = [p for p in model_charts if "comparison" in os.path.basename(p)]
+    if comp_chart:
+        lines.append(_embed_charts(comp_chart, report_dir, chart_captions))
+
+    # ── Section 4: Best Model Analysis ────────────────────────────────────
+    lines += ["---", "", f"## 四、最优模型分析（{best_model}）", ""]
+
+    # Model visualisation charts (excluding comparison)
+    viz_charts = [p for p in model_charts if "comparison" not in os.path.basename(p)]
+    if viz_charts:
+        lines += ["### 模型可视化", ""]
+        lines.append(_embed_charts(viz_charts, report_dir, chart_captions))
+
+    model_analysis = _narr(narrative, "model_analysis")
+    if model_analysis:
+        lines += ["### 模型解读", "", model_analysis, ""]
+
+    # ── Section 5: Conclusions ────────────────────────────────────────────
+    lines += ["---", "", "## 五、结论", ""]
+    conclusions = _narr(narrative, "conclusions")
+    if conclusions:
+        lines += [conclusions, ""]
+
+    # ── Section 6: Recommendations ────────────────────────────────────────
+    lines += ["---", "", "## 六、建议", ""]
+    recommendations = _narr(narrative, "recommendations")
+    if recommendations:
+        lines += [recommendations, ""]
+
+    # ── Section 7: Risks ──────────────────────────────────────────────────
+    lines += ["---", "", "## 七、风险提示", ""]
+    risks = _narr(narrative, "risks")
+    if risks:
+        lines += [risks, ""]
+
+    lines += ["---", f"*本报告由 AutoInsight 自动生成 · {timestamp}*"]
+
+    return "\n".join(lines)
+
+
+# ── Save ─────────────────────────────────────────────────────────────────────
+
+def _save_report(content: str, file_path: str = "") -> str:
     out_dir = os.path.join(os.path.dirname(__file__), "..", "outputs", "reports")
     os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, "analysis_report.md")
+    stem = os.path.splitext(os.path.basename(file_path))[0] if file_path else "report"
+    ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(out_dir, f"report_{stem}_{ts}.md")
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     return path
+
+
+# ── Legacy helpers (kept for test compatibility) ──────────────────────────────
+
+def build_report_data(state: AgentState) -> ReportData:
+    schema = state.get("schema", {})
+    meta   = schema.get("_meta", {})
+    eda    = state.get("eda_summary", {})
+    return {
+        "timestamp":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "file_name":     os.path.basename(state.get("file_path", "")),
+        "target_column": state.get("target_column", ""),
+        "task_type":     state.get("task_type", ""),
+        "user_level":    state.get("user_level", "general"),
+        "row_count":     meta.get("row_count", 0),
+        "col_count":     meta.get("col_count", 0),
+        "quality_issues": ";".join(state.get("quality_issues", [])),
+        "top3_features": eda.get("top3_features", ""),
+        "best_model":    state.get("best_model", ""),
+        "all_metrics":   state.get("metrics", {}),
+    }

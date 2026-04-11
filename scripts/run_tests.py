@@ -226,7 +226,7 @@ def run_single(case: dict, out_dir: Path) -> dict:
 
     # ── Write JSON log ────────────────────────────────────────────────────
     log_path = out_dir / f"log_{case_id}.json"
-    log_path.write_text(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    log_path.write_text(json.dumps(result, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
     # ── Write markdown summary ────────────────────────────────────────────
     _write_summary(result, out_dir / f"summary_{case_id}.md")
