@@ -1,0 +1,52 @@
+[
+  {
+    "id": "housing_regression",
+    "file": "P:/M-DATA/test_data/housing.csv",
+    "prompt": "我想预测加州各地区的房屋价格，哪些因素影响最大？请帮我建立一个预测模型。",
+    "target": "median_house_value",
+    "level": "general",
+    "task_type_expected": "regression",
+    "phase": 1,
+    "note": "Phase 1 可用性验证 - 标准回归任务"
+  },
+  {
+    "id": "adult_classification",
+    "file": "P:/M-DATA/test_data/adult.csv",
+    "prompt": "根据个人信息（年龄、职业、学历等），判断一个人的年收入是否超过5万美元。",
+    "target": "income",
+    "level": "general",
+    "task_type_expected": "classification",
+    "phase": 2,
+    "note": "大规模分类，含类别不平衡"
+  },
+  {
+    "id": "creditcard_anomaly",
+    "file": "P:/M-DATA/test_data/creditcard.csv",
+    "prompt": "我需要在信用卡交易数据中找出异常的欺诈交易，请帮我识别哪些交易是可疑的。",
+    "target": "",
+    "level": "expert",
+    "task_type_expected": "anomaly_detection",
+    "phase": 2,
+    "note": "最大数据集 28万行，高度不平衡"
+  },
+  {
+    "id": "wholesale_clustering",
+    "file": "P:/M-DATA/test_data/Wholesale customers data.csv",
+    "prompt": "我想对批发商客户进行分组，找出不同类型的客户消费模式，便于制定差异化营销策略。",
+    "target": "",
+    "level": "general",
+    "task_type_expected": "clustering",
+    "phase": 2,
+    "note": "小数据集无监督聚类"
+  },
+  {
+    "id": "wine_classification",
+    "file": "P:/M-DATA/test_data/WineQT.csv",
+    "prompt": "根据葡萄酒的化学成分分析，预测葡萄酒的品质等级，帮助酿酒师改进配方。",
+    "target": "quality",
+    "level": "expert",
+    "task_type_expected": "classification",
+    "phase": 2,
+    "note": "多分类，专家报告"
+  }
+]

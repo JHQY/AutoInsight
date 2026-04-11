@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime
-from anthropic import Anthropic
+from openai import OpenAI
 from app.state import AgentState, ReportData
 
 
@@ -128,8 +128,10 @@ def build_report_data(state: AgentState) -> ReportData:
 
 
 def _call_llm(template: str, report_data: ReportData) -> str:
-    client = Anthropic()
-    # Exclude non-serializable or very large objects
+    client = OpenAI(
+        api_key=os.environ.get("DEEPSEEK_API_KEY"),
+        base_url="https://api.deepseek.com",
+    )
     data_json = {
         k: v for k, v in report_data.items()
         if v not in (None, "", 0, 0.0, []) and k not in ("X_train", "X_test", "y_train", "y_test")
@@ -138,12 +140,12 @@ def _call_llm(template: str, report_data: ReportData) -> str:
         f"{template}\n\n---\n"
         f"以下是分析数据：\n```json\n{json.dumps(data_json, ensure_ascii=False, indent=2)}\n```"
     )
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
+    response = client.chat.completions.create(
+        model="deepseek-chat",
         max_tokens=4096,
         messages=[{"role": "user", "content": user_msg}],
     )
-    return response.content[0].text
+    return response.choices[0].message.content
 
 
 def _save_report(content: str) -> str:

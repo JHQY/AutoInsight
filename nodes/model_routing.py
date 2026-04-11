@@ -75,7 +75,7 @@ Output:
         base_url="https://api.deepseek.com",
         temperature=0,
     )
-    structured_llm = llm.with_structured_output(ModelRoutingOutput)
+    structured_llm = llm.with_structured_output(ModelRoutingOutput, method="function_calling")
     result: ModelRoutingOutput = structured_llm.invoke(prompt)
 
     return {

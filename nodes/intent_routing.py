@@ -1,5 +1,6 @@
+import os
 from pydantic import BaseModel
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from app.state import AgentState
 
 
@@ -60,8 +61,13 @@ Instructions:
    as the user's goal (Chinese if user wrote Chinese, English otherwise).
 """
 
-    llm = ChatAnthropic(model="claude-haiku-4-5-20251001", temperature=0)
-    structured_llm = llm.with_structured_output(IntentOutput)
+    llm = ChatOpenAI(
+        model="deepseek-chat",
+        api_key=os.environ.get("DEEPSEEK_API_KEY"),
+        base_url="https://api.deepseek.com",
+        temperature=0,
+    )
+    structured_llm = llm.with_structured_output(IntentOutput, method="function_calling")
     result: IntentOutput = structured_llm.invoke(prompt)
 
     updates: dict = {
