@@ -1,3 +1,4 @@
+import json
 import pytest
 from fastapi.testclient import TestClient
 
@@ -56,3 +57,31 @@ def test_analyze_valid_returns_task_id(client, monkeypatch):
     body = resp.json()
     assert "task_id" in body
     assert len(body["task_id"]) > 0
+
+
+def test_progress_sse_streams_events(client):
+    import queue as q_module
+    import app.server as srv
+
+    task_id = "sse-test-001"
+    test_q = q_module.Queue()
+    test_q.put(json.dumps({"node": "profiling", "status": "done"}))
+    test_q.put(json.dumps({"node": "intent_routing", "status": "done"}))
+    test_q.put(json.dumps({"event": "complete", "task_type": "regression",
+                            "best_model": "XGBoost", "elapsed": 3}))
+    test_q.put(None)
+    srv.TASK_QUEUES[task_id] = test_q
+
+    with client.stream("GET", f"/progress/{task_id}") as resp:
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+        body = resp.read().decode()
+
+    assert '"profiling"' in body
+    assert '"intent_routing"' in body
+    assert '"complete"' in body
+
+
+def test_progress_unknown_task(client):
+    resp = client.get("/progress/does-not-exist")
+    assert resp.status_code == 404

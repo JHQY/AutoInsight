@@ -120,3 +120,22 @@ def _run_graph(task_id: str, initial_state: dict) -> None:
         q.put(json.dumps({"event": "error", "message": str(exc)}))
     finally:
         q.put(None)
+
+
+@app.get("/progress/{task_id}")
+async def progress(task_id: str):
+    if task_id not in TASK_QUEUES:
+        raise HTTPException(status_code=404, detail="Task not found.")
+
+    async def event_stream():
+        q = TASK_QUEUES[task_id]
+        loop = asyncio.get_event_loop()
+        while True:
+            item = await loop.run_in_executor(None, q.get)
+            if item is None:
+                if task_id in TASK_QUEUES:
+                    del TASK_QUEUES[task_id]
+                break
+            yield f"data: {item}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
