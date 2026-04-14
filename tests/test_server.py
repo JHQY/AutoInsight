@@ -85,3 +85,30 @@ def test_progress_sse_streams_events(client):
 def test_progress_unknown_task(client):
     resp = client.get("/progress/does-not-exist")
     assert resp.status_code == 404
+
+
+def test_report_download(client, tmp_path):
+    import app.server as srv
+
+    task_id = "report-test-001"
+    report_file = tmp_path / "analysis_report.md"
+    report_file.write_text("# Report\nHello world", encoding="utf-8")
+    srv.TASK_RESULTS[task_id] = {"report_path": str(report_file)}
+
+    resp = client.get(f"/report/{task_id}")
+    assert resp.status_code == 200
+    assert "attachment" in resp.headers.get("content-disposition", "")
+    assert "Report" in resp.text
+
+
+def test_report_unknown_task(client):
+    resp = client.get("/report/no-such-task")
+    assert resp.status_code == 404
+
+
+def test_report_missing_file(client):
+    import app.server as srv
+    task_id = "report-test-002"
+    srv.TASK_RESULTS[task_id] = {"report_path": "/nonexistent/path.md"}
+    resp = client.get(f"/report/{task_id}")
+    assert resp.status_code == 404

@@ -139,3 +139,25 @@ async def progress(task_id: str):
             yield f"data: {item}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/report/{task_id}")
+def report(task_id: str):
+    if task_id not in TASK_RESULTS:
+        raise HTTPException(status_code=404, detail="Task not found or not yet complete.")
+
+    report_path = TASK_RESULTS[task_id].get("report_path", "")
+    if not report_path or not os.path.exists(report_path):
+        raise HTTPException(status_code=404, detail="Report file not found.")
+
+    filename = os.path.basename(report_path)
+    return FileResponse(
+        report_path,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.server:app", host="127.0.0.1", port=8000, reload=False)
