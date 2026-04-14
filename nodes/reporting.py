@@ -251,37 +251,76 @@ def _call_llm_narrative(state: AgentState) -> dict:
         ensure_ascii=False, indent=2
     )
 
+    # Build prediction statistics so the LLM has real numbers to cite
+    prediction_stats_str = ""
+    best_result = (state.get("model_results") or {}).get(best_model, {})
+    predictions = best_result.get("predictions")
+    y_test = state.get("y_test")
+    if predictions is not None and task_type == "regression":
+        try:
+            preds = np.array(predictions).ravel()
+            preds = preds[np.isfinite(preds)]
+            if len(preds):
+                prediction_stats_str = (
+                    f"Predicted value distribution — "
+                    f"mean: {np.mean(preds):.2f}, median: {np.median(preds):.2f}, "
+                    f"std: {np.std(preds):.2f}, "
+                    f"range: [{np.min(preds):.2f}, {np.max(preds):.2f}], "
+                    f"25th pct: {np.percentile(preds, 25):.2f}, "
+                    f"75th pct: {np.percentile(preds, 75):.2f}"
+                )
+        except Exception:
+            pass
+
+    conclusions_spec_expert = (
+        "- \"conclusions\": 2-3 conclusions written as a DIRECT ANSWER to the user's specific question above.\n"
+        "  • If the question is about prediction/forecasting: state what the model says about the target's level, range, and direction, using the prediction statistics provided.\n"
+        "  • If the question is about key drivers: state which factors push the target up or down and by how much.\n"
+        "  • If the question is about segmentation/clustering: describe the groups found and what differentiates them.\n"
+        "  Do NOT list generic feature importances. Do NOT mention model names or accuracy scores. (bullet points, Chinese)"
+    )
+    conclusions_spec_general = (
+        "- \"conclusions\": 2-3 plain-language sentences that are a DIRECT ANSWER to the user's specific question above.\n"
+        "  • If the question is about prediction/forecasting: state the predicted price level/range/trend using the prediction statistics provided — give concrete numbers where available.\n"
+        "  • If the question is about key drivers: explain in plain language which factors matter most and how they affect the outcome.\n"
+        "  • If the question is about segmentation/clustering: describe the groups in terms the user cares about.\n"
+        "  Do NOT just list feature importances as if that were the answer. Do NOT mention model names or accuracy scores. (bullet points, Chinese)"
+    )
+
     if user_level == "expert":
-        section_spec = """Return a JSON object with these keys:
+        section_spec = f"""Return a JSON object with these keys:
 - "eda_narrative": technical EDA findings (2-3 paragraphs, Chinese)
 - "model_rationale": explain the algorithm selection reasoning (1-2 paragraphs, Chinese)
 - "model_analysis": interpret the best model's metrics technically (1-2 paragraphs, Chinese)
-- "conclusions": 2-3 conclusions that DIRECTLY ANSWER the user's business question — cite specific features/patterns found in data, NOT model accuracy scores (bullet points, Chinese)
-- "recommendations": 3-5 concrete actions the user should take based on what the data revealed about their question — short-term (1-3 months) and long-term (3-12 months) (bullet points, Chinese)
+{conclusions_spec_expert}
+- "recommendations": 3-5 concrete actions the user should take based on what the data revealed about their specific question — short-term (1-3 months) and long-term (3-12 months). Ground each action in the findings, not in model improvement. (bullet points, Chinese)
 - "risks": 2-3 risks or caveats relevant to acting on these findings (bullet points, Chinese)"""
     else:
-        section_spec = """Return a JSON object with these keys:
+        section_spec = f"""Return a JSON object with these keys:
 - "eda_narrative": explain EDA findings in plain language without jargon (2-3 paragraphs, Chinese)
 - "model_rationale": explain in simple terms why these models were chosen (1 paragraph, Chinese)
 - "model_analysis": translate model performance into business meaning, no metric numbers (1-2 paragraphs, Chinese)
-- "conclusions": 2-3 plain-language conclusions that DIRECTLY ANSWER the user's business question — e.g. which factors matter most, what the data reveals. Do NOT mention model names or accuracy scores (bullet points, Chinese)
-- "recommendations": 3-5 specific actions the user should take based on what the data revealed — short-term (1-3 months) and long-term (3-12 months). Focus on the user's actual goal, not on improving the model (bullet points, Chinese)
+{conclusions_spec_general}
+- "recommendations": 3-5 specific actions the user should take to act on the answer to their question — short-term (1-3 months) and long-term (3-12 months). These should follow naturally from the conclusions, not from model improvement ideas. (bullet points, Chinese)
 - "risks": 2-3 plain-language warnings about limitations of these findings for the user's decision (bullet points, Chinese)"""
 
-    prompt = f"""You are a business analyst writing a report for a user who asked a specific business question.
-Your job is to answer THEIR question using data findings — not to evaluate the ML model.
+    prediction_block = f"\nPrediction statistics:\n{prediction_stats_str}\n" if prediction_stats_str else ""
 
-User's original question: {state.get("user_query", "")}
+    prompt = f"""You are a business analyst answering a specific question the user asked about their data.
+Your ONE job: use the data findings to directly answer the user's question below.
+Do NOT write a generic data science report. Do NOT default to "key factors are X, Y, Z" unless that IS the answer to the question.
+
+User's question: {state.get("user_query", "")}
 Restated intent: {state.get("user_intent_summary", "")}
 Task type: {task_type}
-Model selection reasoning: {reasoning}
 
 EDA summary:
 - Top 3 features: {eda_summary.get("top3_features", "")}
 - Distribution: {eda_summary.get("distribution_desc", "")}
 - Layer analysis: {eda_summary.get("layer_desc", "")}
 - Outliers: {eda_summary.get("abnormal_desc", "")}
-
+{prediction_block}
+Model selection reasoning: {reasoning}
 Model results (all candidates):
 {metrics_str}
 
