@@ -96,7 +96,7 @@ async def analyze(
         "y_train": None, "y_test": None,
         "report_path":          "",
         "prediction_path":      "",
-        "prediction_stats":     {},
+        "insight_data":         {},
         "X_full":               None,
     }
 

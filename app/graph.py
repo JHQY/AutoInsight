@@ -8,7 +8,7 @@ from nodes.eda            import run_eda
 from nodes.model_routing  import model_routing_node
 from nodes.modeling       import modeling_node
 from nodes.evaluation     import evaluation_node
-from nodes.inference      import inference_node
+from nodes.insight        import insight_node
 from nodes.reporting      import generate_report
 
 
@@ -29,7 +29,7 @@ def build_graph():
     graph.add_node("model_routing",  model_routing_node)
     graph.add_node("modeling",       modeling_node)
     graph.add_node("evaluation",     evaluation_node)
-    graph.add_node("inference",      inference_node)
+    graph.add_node("inference",      insight_node)
     graph.add_node("reporting",      generate_report)
 
     graph.set_entry_point("profiling")

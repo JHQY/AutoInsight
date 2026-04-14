@@ -68,7 +68,7 @@ class AgentState(TypedDict, total=False):
 
     # ── Reporting ────────────────────────────────────────────────────
     prediction_path:      str
-    prediction_stats:     dict
+    insight_data:         dict
 
     report_path:          str
 

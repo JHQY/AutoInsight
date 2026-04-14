@@ -269,6 +269,78 @@ def _llm_call(prompt: str, max_tokens: int = 2000) -> dict:
         return {}
 
 
+def _format_insight_for_llm(insight_data: dict, task_type: str) -> str:
+    """Format insight_data into a concise text block for the LLM prompt."""
+    if not insight_data:
+        return ""
+
+    lines = ["\nInsight extraction findings:"]
+
+    fi = insight_data.get("feature_importance", [])
+    if fi:
+        lines.append("  Feature importance (what drives the outcome):")
+        for item in fi[:8]:
+            direction = item.get("direction", "")
+            dir_str   = f" [{direction} effect]" if direction and direction != "unknown" else ""
+            lines.append(
+                f"    {item['feature']}: {item['importance_pct']}%{dir_str}"
+            )
+
+    # Regression: test-set prediction range
+    tps = insight_data.get("test_prediction_stats")
+    if tps:
+        lines.append(
+            f"  Out-of-sample prediction range: "
+            f"median={tps['median']}, mean={tps['mean']}, "
+            f"range=[{tps['min']}, {tps['max']}], "
+            f"25th–75th pct=[{tps['p25']}, {tps['p75']}]"
+        )
+
+    # Classification: class profiles
+    cp = insight_data.get("class_profiles")
+    if cp:
+        lines.append("  Class profiles (mean feature values per predicted class):")
+        for cls, profile in cp.items():
+            ratio = profile.get("ratio", 0)
+            vals  = {k: v for k, v in profile.items() if k not in ("count", "ratio")}
+            top   = list(vals.items())[:5]
+            val_str = ", ".join(f"{k}={v}" for k, v in top)
+            lines.append(f"    Class {cls} ({ratio:.1%} of test set): {val_str}")
+
+    lcr = insight_data.get("low_confidence_ratio")
+    if lcr is not None:
+        lines.append(f"  Low-confidence predictions: {lcr:.1%} of test samples")
+
+    # Clustering: cluster profiles
+    n_clusters = insight_data.get("n_clusters")
+    cprofiles  = insight_data.get("cluster_profiles", {})
+    if n_clusters is not None:
+        lines.append(f"  {n_clusters} natural groups found:")
+        for cid, profile in cprofiles.items():
+            size  = profile.get("size", "?")
+            ratio = profile.get("ratio", 0)
+            vals  = {k: v for k, v in profile.items() if k not in ("size", "ratio")}
+            top   = list(vals.items())[:5]
+            val_str = ", ".join(f"{k}={v}" for k, v in top)
+            lines.append(f"    Group {cid} ({size} rows, {ratio:.1%}): {val_str}")
+
+    # Anomaly detection: profiles
+    n_anom = insight_data.get("n_anomaly")
+    if n_anom is not None:
+        ratio = insight_data.get("anomaly_ratio", 0)
+        lines.append(f"  Anomalies found: {n_anom} rows ({ratio:.1%} of total)")
+        ap = insight_data.get("anomaly_profile", {})
+        np_ = insight_data.get("normal_profile", {})
+        if ap and np_:
+            lines.append("  Anomaly vs normal comparison (feature means):")
+            for feat in list(ap.keys())[:6]:
+                a_val = ap.get(feat, "?")
+                n_val = np_.get(feat, "?")
+                lines.append(f"    {feat}: anomaly={a_val} vs normal={n_val}")
+
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
 def _call_llm_technical(state: AgentState) -> dict:
     """Call 1: EDA narrative, model rationale, model analysis — has access to model metrics."""
     user_level  = state.get("user_level", "general")
@@ -328,78 +400,46 @@ def _call_llm_business_answer(state: AgentState) -> dict:
     eda_summary = state.get("eda_summary", {})
     best_model  = state.get("best_model", "")
 
-    # Prediction statistics come from the inference node (full-dataset predictions)
-    prediction_stats = state.get("prediction_stats") or {}
-    prediction_stats_str = ""
-    if prediction_stats:
-        if task_type == "regression":
-            ps = prediction_stats
-            prediction_stats_str = (
-                f"Full-dataset predicted value distribution ({ps.get('count', '?')} rows):\n"
-                f"  mean={ps.get('mean','?')}, median={ps.get('median','?')}, "
-                f"std={ps.get('std','?')}, "
-                f"range=[{ps.get('min','?')}, {ps.get('max','?')}], "
-                f"25th pct={ps.get('p25','?')}, 75th pct={ps.get('p75','?')}, "
-                f"90th pct={ps.get('p90','?')}"
-            )
-        elif task_type == "classification":
-            ps = prediction_stats
-            dist = ps.get("class_distribution", {})
-            ratios = ps.get("class_ratios", {})
-            lines = [f"  {k}: {dist.get(k,0)} rows ({round(ratios.get(k,0)*100,1)}%)" for k in dist]
-            prediction_stats_str = f"Full-dataset prediction class breakdown ({ps.get('total','?')} rows):\n" + "\n".join(lines)
-        elif task_type == "clustering":
-            ps = prediction_stats
-            sizes = ps.get("cluster_sizes", {})
-            lines = [f"  Cluster {k}: {v} rows" for k, v in sizes.items()]
-            prediction_stats_str = f"Full-dataset cluster assignment ({ps.get('n_clusters','?')} clusters):\n" + "\n".join(lines)
-        elif task_type == "anomaly_detection":
-            ps = prediction_stats
-            prediction_stats_str = (
-                f"Full-dataset anomaly detection ({ps.get('total','?')} rows): "
-                f"{ps.get('n_anomaly','?')} anomalies ({round(ps.get('anomaly_ratio',0)*100,1)}%), "
-                f"{ps.get('n_normal','?')} normal"
-            )
+    # Insight data from the insight extraction node
+    insight_data = state.get("insight_data") or {}
+    insight_block = _format_insight_for_llm(insight_data, task_type)
 
     if user_level == "expert":
         section_spec = """Return a JSON object with exactly these keys:
-- "conclusions": 2-3 bullet points that DIRECTLY ANSWER the user's question using data findings.
-  Use concrete numbers from the prediction statistics if available.
+- "conclusions": 2-3 bullet points that DIRECTLY ANSWER the user's question using the data findings above.
+  Use specific numbers and feature names where available.
   Do NOT mention model names, R², RMSE, accuracy, or any ML metric.
   Do NOT suggest deploying models, feature engineering, or SHAP analysis.
-- "recommendations": 3-5 bullet points of actions the user should take based on what the data reveals about THEIR question.
+- "recommendations": 3-5 bullet points of actions the user should take based on the findings.
   Short-term (1-3 months) and long-term (3-12 months).
-  Ground each recommendation in a specific data finding — NOT in model improvement.
-  Do NOT suggest deploying models or improving the ML pipeline.
+  Ground each recommendation in a specific finding — NOT in model improvement.
 - "risks": 2-3 bullet points about data limitations or real-world caveats for the user's decision.
 All in Chinese."""
     else:
         section_spec = """Return a JSON object with exactly these keys:
 - "conclusions": 2-3 plain-language bullet points that DIRECTLY ANSWER the user's question.
-  Use concrete numbers from the prediction statistics if available.
-  FORBIDDEN: model names, R², RMSE, accuracy scores, "the model shows", feature importance lists.
-  FORBIDDEN: any suggestion about deploying models, improving algorithms, or SHAP analysis.
-- "recommendations": 3-5 plain-language actions the user should take based on what the data reveals.
+  Use specific numbers where available.
+  FORBIDDEN: model names, R², RMSE, accuracy scores, "the model shows".
+  FORBIDDEN: deploying models, improving algorithms, SHAP analysis.
+- "recommendations": 3-5 plain-language actions the user should take based on the findings.
   Short-term (1-3 months) and long-term (3-12 months).
-  Each recommendation must be about what the USER should DO with the findings — not about improving the data pipeline.
+  Each recommendation is about what the USER should DO — not about improving the data pipeline.
   FORBIDDEN: "deploy the model", "feature engineering", "collect more data", "tune hyperparameters".
 - "risks": 2-3 plain-language warnings about limitations relevant to the user's decision.
 All in Chinese."""
 
-    prediction_block = f"\n{prediction_stats_str}\n" if prediction_stats_str else ""
+    prompt = f"""A user asked a question about their data. Your job is to answer THEIR question using the data findings below.
 
-    prompt = f"""A user asked a question about their data. Your job is to answer THEIR question — not to evaluate the ML model that was used internally.
-
-The user does not know or care that a machine learning model was used. They just want their question answered using data.
+The user does not know or care that a machine learning model was used. They just want their question answered.
 
 USER'S QUESTION: {state.get("user_query", "")}
 (Restated as): {state.get("user_intent_summary", "")}
 
-Data findings you can use to answer:
-- Key features identified: {eda_summary.get("top3_features", "")}
-- Data distribution: {eda_summary.get("distribution_desc", "")}
-- Segment analysis: {eda_summary.get("layer_desc", "")}
-{prediction_block}
+Data findings:
+- Key features: {eda_summary.get("top3_features", "")}
+- Distribution: {eda_summary.get("distribution_desc", "")}
+- Segment patterns: {eda_summary.get("layer_desc", "")}
+{insight_block}
 {section_spec}
 
 IMPORTANT: Return ONLY valid JSON. No markdown code fences, no extra text."""
