@@ -481,10 +481,14 @@ function showComplete(data) {
   const taskLabel = taskTypeMap[data.task_type] || data.task_type || "未知";
   document.getElementById("complete-meta").textContent =
     `任务类型：${taskLabel} · 最优模型：${data.best_model || "N/A"} · 用时 ${data.elapsed} 秒`;
-  // Show predictions download button only when inference ran (non-analytical tasks)
-  const hasPredictions = data.task_type && data.task_type !== "correlation_analysis";
+  // Prediction CSV is only generated for unsupervised tasks (full-dataset labeling)
+  const hasPredictions = data.task_type === "clustering" || data.task_type === "anomaly_detection";
   const predBtn = document.getElementById("btn-predictions");
-  if (predBtn) predBtn.style.display = hasPredictions ? "block" : "none";
+  if (predBtn) {
+    predBtn.style.display = hasPredictions ? "block" : "none";
+    if (data.task_type === "clustering")        predBtn.textContent = "⬇ 下载分群结果（CSV）";
+    if (data.task_type === "anomaly_detection") predBtn.textContent = "⬇ 下载异常标注结果（CSV）";
+  }
   document.getElementById("complete-card").classList.add("visible");
 }
 
