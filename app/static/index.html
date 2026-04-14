@@ -1,2 +1,480 @@
 <!DOCTYPE html>
-<html><body><h1>AutoInsight — coming soon</h1></body></html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoInsight</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0f172a; color: #e2e8f0;
+    font-family: system-ui, -apple-system, sans-serif;
+    min-height: 100vh; padding: 32px 16px;
+  }
+  .container { max-width: 680px; margin: 0 auto; }
+
+  .title { text-align: center; font-size: 28px; font-weight: 800;
+           color: #f8fafc; letter-spacing: 1px; margin-bottom: 6px; }
+  .subtitle { text-align: center; color: #64748b; font-size: 14px;
+              margin-bottom: 32px; }
+  .label { display: block; color: #94a3b8; font-size: 11px; font-weight: 600;
+           text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+  .hint  { color: #475569; font-size: 11px; margin-top: 5px; }
+
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+          padding: 18px; margin-bottom: 14px; }
+
+  textarea {
+    width: 100%; background: #0f172a; border: 1px solid #475569;
+    border-radius: 8px; padding: 12px 14px; color: #e2e8f0;
+    font-size: 14px; line-height: 1.6; resize: vertical;
+    min-height: 90px; font-family: inherit;
+    transition: border-color .2s;
+  }
+  textarea:focus { outline: none; border-color: #6366f1; }
+
+  .dropzone {
+    background: #0f172a; border: 2px dashed #334155; border-radius: 8px;
+    padding: 28px; text-align: center; cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .dropzone:hover, .dropzone.drag-over { border-color: #6366f1; background: #1e1b4b22; }
+  .dropzone.valid   { border-color: #22c55e; background: #14532d11; }
+  .dropzone.invalid { border-color: #ef4444; background: #7f1d1d11; }
+  .dropzone-icon  { font-size: 28px; margin-bottom: 8px; }
+  .dropzone-label { color: #94a3b8; font-size: 14px; margin-bottom: 4px; }
+  .dropzone-hint  { color: #475569; font-size: 12px; }
+  .file-info { display: none; align-items: center; gap: 10px; }
+  .file-info.visible { display: flex; }
+  .file-name { color: #86efac; font-size: 13px; font-weight: 600; }
+  .file-size { color: #4ade80; font-size: 11px; }
+  input[type=file] { display: none; }
+  .file-error { color: #f87171; font-size: 11px; margin-top: 5px; display: none; }
+
+  .toggle-group { display: flex; gap: 8px; }
+  .toggle-option {
+    flex: 1; background: #0f172a; border: 2px solid #334155;
+    border-radius: 6px; padding: 10px 12px; cursor: pointer;
+    transition: border-color .2s;
+  }
+  .toggle-option.selected { border-color: #6366f1; }
+  .toggle-option h4 { color: #94a3b8; font-size: 13px; font-weight: 600;
+                      margin-bottom: 3px; }
+  .toggle-option.selected h4 { color: #a5b4fc; }
+  .toggle-option p  { color: #64748b; font-size: 11px; line-height: 1.4; }
+
+  .tune-row { display: flex; align-items: center; justify-content: space-between;
+              padding-top: 10px; border-top: 1px solid #1e293b; margin-top: 10px; }
+  .tune-label h4 { color: #cbd5e1; font-size: 13px; font-weight: 500; }
+  .tune-label p  { color: #475569; font-size: 11px; margin-top: 2px; }
+  .switch {
+    width: 42px; height: 24px; background: #1e293b; border: 1px solid #374151;
+    border-radius: 12px; position: relative; cursor: pointer;
+    transition: background .2s; flex-shrink: 0;
+  }
+  .switch.on { background: #4f46e5; border-color: #4f46e5; }
+  .switch-knob {
+    width: 18px; height: 18px; background: #475569; border-radius: 50%;
+    position: absolute; top: 2px; left: 3px; transition: left .2s, background .2s;
+  }
+  .switch.on .switch-knob { left: 21px; background: #fff; }
+
+  .btn-primary {
+    width: 100%; background: #6366f1; color: white; border: none;
+    border-radius: 8px; padding: 14px; font-size: 15px; font-weight: 600;
+    cursor: pointer; letter-spacing: .3px; transition: background .2s, opacity .2s;
+  }
+  .btn-primary:hover:not(:disabled) { background: #4f46e5; }
+  .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-hint { text-align: center; color: #374151; font-size: 12px; margin-top: 8px;
+              min-height: 18px; }
+
+  #analysis-phase { display: none; }
+
+  .input-summary {
+    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 14px;
+    color: #64748b; font-size: 12px; line-height: 1.5;
+  }
+  .input-summary strong { color: #94a3b8; }
+
+  .node-chain { background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+                padding: 20px; margin-bottom: 14px; }
+  .node-chain-title { color: #94a3b8; font-size: 11px; font-weight: 600;
+                      text-transform: uppercase; letter-spacing: .5px; margin-bottom: 16px; }
+  .node-item { display: flex; align-items: center; gap: 12px; padding: 7px 0; }
+  .node-icon {
+    width: 34px; height: 34px; border-radius: 50%; border: 2px solid #374151;
+    background: #1f2937; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; color: #4b5563; flex-shrink: 0;
+    transition: background .3s, border-color .3s, color .3s;
+  }
+  .node-icon.running { background: #713f12; border-color: #eab308; color: #fde047; }
+  .node-icon.done    { background: #14532d; border-color: #22c55e; color: #4ade80; }
+  .node-icon.skipped { background: #1f2937; border-color: #374151; color: #4b5563; }
+  .node-icon.error   { background: #7f1d1d; border-color: #ef4444; color: #fca5a5; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .node-icon.running span { display: inline-block; animation: spin 1.2s linear infinite; }
+  .node-text { flex: 1; }
+  .node-name { font-size: 13px; color: #6b7280; font-weight: 500; transition: color .3s; }
+  .node-name.running  { color: #fde047; font-weight: 600; }
+  .node-name.done     { color: #86efac; }
+  .node-name.skipped  { color: #4b5563; }
+  .node-name.error    { color: #fca5a5; }
+  .node-status { font-size: 11px; color: #475569; min-height: 14px; }
+  .node-connector { margin-left: 16px; width: 2px; height: 10px;
+                    background: #1f2937; transition: background .3s; }
+  .node-connector.done    { background: #14532d; }
+  .node-connector.running { background: #713f1244; }
+
+  #complete-card {
+    display: none; background: #14532d22; border: 1px solid #22c55e55;
+    border-radius: 10px; padding: 18px; text-align: center; margin-bottom: 14px;
+  }
+  #complete-card.visible { display: block; }
+  .complete-title { color: #4ade80; font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .complete-meta  { color: #6b7280; font-size: 12px; margin-bottom: 14px; }
+  .btn-download {
+    width: 100%; background: #22c55e; color: #052e16; border: none;
+    border-radius: 8px; padding: 13px; font-size: 14px; font-weight: 700;
+    cursor: pointer; margin-bottom: 8px;
+  }
+  .btn-download:hover { background: #16a34a; }
+  .btn-reset {
+    width: 100%; background: transparent; color: #4ade80;
+    border: 1px solid #22c55e44; border-radius: 8px; padding: 9px;
+    font-size: 13px; cursor: pointer;
+  }
+  .btn-reset:hover { border-color: #22c55e88; }
+
+  #error-card {
+    display: none; background: #7f1d1d22; border: 1px solid #ef444455;
+    border-radius: 10px; padding: 18px; text-align: center; margin-bottom: 14px;
+  }
+  #error-card.visible { display: block; }
+  .error-title { color: #fca5a5; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .error-msg   { color: #9ca3af; font-size: 12px; margin-bottom: 14px; word-break: break-word; }
+
+  #download-pending {
+    background: #1e293b44; border: 1px solid #33415555;
+    border-radius: 8px; padding: 12px; text-align: center;
+    color: #374151; font-size: 13px; margin-bottom: 14px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div id="input-phase">
+    <div class="title">⚡ AutoInsight</div>
+    <div class="subtitle">自动化数据挖掘 · 只需描述你的业务问题</div>
+
+    <div class="card">
+      <label class="label" for="prompt-input">你想从数据中得到什么？</label>
+      <textarea id="prompt-input"
+        placeholder="例如：我想知道哪些因素最影响房价，以及能否预测未来的房价走势"
+        oninput="validateForm()"></textarea>
+      <div class="hint">请用自然语言描述你的业务问题，系统会自动判断分析类型</div>
+    </div>
+
+    <div class="card">
+      <label class="label">上传数据文件</label>
+      <div class="dropzone" id="dropzone"
+           onclick="document.getElementById('file-input').click()"
+           ondragover="onDragOver(event)"
+           ondragleave="onDragLeave(event)"
+           ondrop="onDrop(event)">
+        <input type="file" id="file-input" accept=".csv" onchange="onFileChange(event)">
+        <div id="dropzone-default">
+          <div class="dropzone-icon">📂</div>
+          <div class="dropzone-label">点击选择或拖拽文件到此处</div>
+          <div class="dropzone-hint">仅支持 CSV 格式 · 建议不超过 200,000 行</div>
+        </div>
+        <div class="file-info" id="file-info">
+          <span style="font-size:22px">📄</span>
+          <div>
+            <div class="file-name" id="file-name-text"></div>
+            <div class="file-size" id="file-size-text"></div>
+          </div>
+        </div>
+      </div>
+      <div class="file-error" id="file-error">请上传 .csv 格式的文件</div>
+    </div>
+
+    <div class="card">
+      <label class="label">分析选项</label>
+      <div style="margin-bottom:14px">
+        <div style="color:#cbd5e1;font-size:13px;font-weight:500;margin-bottom:8px">
+          报告风格 <span style="color:#475569;font-weight:400;font-size:12px">— 请选择你的背景</span>
+        </div>
+        <div class="toggle-group">
+          <div class="toggle-option selected" id="level-general" onclick="selectLevel('general')">
+            <h4>通俗易懂</h4>
+            <p>我对数据分析不熟悉，请用业务语言解释</p>
+          </div>
+          <div class="toggle-option" id="level-expert" onclick="selectLevel('expert')">
+            <h4>专业详细</h4>
+            <p>我有数据分析背景，请包含技术细节和指标</p>
+          </div>
+        </div>
+      </div>
+      <div class="tune-row">
+        <div class="tune-label">
+          <h4>超参调优</h4>
+          <p>开启后自动搜索更优参数，分析时间会增加约 2–5 分钟</p>
+        </div>
+        <div class="switch" id="tune-switch" onclick="toggleTune()">
+          <div class="switch-knob"></div>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-primary" id="start-btn" disabled onclick="startAnalysis()">
+      开始分析
+    </button>
+    <div class="btn-hint" id="start-hint">请先上传 CSV 文件并填写业务问题</div>
+  </div>
+
+  <div id="analysis-phase">
+    <div class="title" style="margin-bottom:24px">⚡ AutoInsight</div>
+    <div class="input-summary" id="input-summary"></div>
+    <div class="node-chain">
+      <div class="node-chain-title">分析进度</div>
+      <div id="node-list"></div>
+    </div>
+    <div id="download-pending">⬇ 分析完成后可下载报告</div>
+    <div id="complete-card">
+      <div class="complete-title">✓ 分析完成</div>
+      <div class="complete-meta" id="complete-meta"></div>
+      <button class="btn-download" onclick="downloadReport()">⬇ 下载分析报告（Markdown）</button>
+      <button class="btn-reset" onclick="resetToInput()">重新分析</button>
+    </div>
+    <div id="error-card">
+      <div class="error-title">✕ 分析出错</div>
+      <div class="error-msg" id="error-msg"></div>
+      <button class="btn-reset" onclick="resetToInput()">重新分析</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const NODES = [
+  { key: "profiling",      label: "数据剖析" },
+  { key: "intent_routing", label: "意图识别" },
+  { key: "processing",     label: "数据清洗" },
+  { key: "eda",            label: "探索性分析（EDA）" },
+  { key: "model_routing",  label: "模型路由" },
+  { key: "modeling",       label: "建模" },
+  { key: "evaluation",     label: "模型评估" },
+  { key: "reporting",      label: "报告生成" },
+];
+
+const STATUS_TEXT = { running: "正在运行…", done: "已完成", skipped: "已跳过", error: "出错" };
+const STATUS_ICON = { pending: "○", running: "⟳", done: "✓", skipped: "—", error: "✕" };
+
+let nodeStates = {};
+let selectedLevel = "general";
+let tuneEnabled   = false;
+let selectedFile  = null;
+let currentTaskId = null;
+
+function validateForm() {
+  const hasPrompt = document.getElementById("prompt-input").value.trim().length > 0;
+  const hasFile   = selectedFile !== null;
+  const btn  = document.getElementById("start-btn");
+  const hint = document.getElementById("start-hint");
+  btn.disabled = !(hasPrompt && hasFile);
+  hint.textContent = (!hasPrompt && !hasFile) ? "请先上传 CSV 文件并填写业务问题"
+                   : !hasFile   ? "请上传 CSV 文件"
+                   : !hasPrompt ? "请填写业务问题描述"
+                   : "";
+}
+
+function selectLevel(lvl) {
+  selectedLevel = lvl;
+  document.getElementById("level-general").classList.toggle("selected", lvl === "general");
+  document.getElementById("level-expert").classList.toggle("selected",  lvl === "expert");
+}
+
+function toggleTune() {
+  tuneEnabled = !tuneEnabled;
+  document.getElementById("tune-switch").classList.toggle("on", tuneEnabled);
+}
+
+function handleFile(file) {
+  const dz    = document.getElementById("dropzone");
+  const errEl = document.getElementById("file-error");
+  if (!file.name.toLowerCase().endsWith(".csv")) {
+    dz.classList.add("invalid");
+    dz.classList.remove("valid");
+    errEl.style.display = "block";
+    selectedFile = null;
+    validateForm();
+    return;
+  }
+  selectedFile = file;
+  dz.classList.add("valid");
+  dz.classList.remove("invalid");
+  errEl.style.display = "none";
+  document.getElementById("dropzone-default").style.display = "none";
+  const info = document.getElementById("file-info");
+  info.classList.add("visible");
+  document.getElementById("file-name-text").textContent = file.name;
+  document.getElementById("file-size-text").textContent =
+    file.size > 1024 * 1024
+      ? `${(file.size / 1024 / 1024).toFixed(1)} MB · CSV 格式 ✓`
+      : `${Math.round(file.size / 1024)} KB · CSV 格式 ✓`;
+  validateForm();
+}
+
+function onFileChange(e)  { if (e.target.files[0]) handleFile(e.target.files[0]); }
+function onDragOver(e)    { e.preventDefault(); document.getElementById("dropzone").classList.add("drag-over"); }
+function onDragLeave(e)   { document.getElementById("dropzone").classList.remove("drag-over"); }
+function onDrop(e)        { e.preventDefault(); onDragLeave(e); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }
+
+function buildNodeChain() {
+  NODES.forEach(n => { nodeStates[n.key] = "pending"; });
+  const list = document.getElementById("node-list");
+  list.innerHTML = "";
+  NODES.forEach((n, i) => {
+    const item = document.createElement("div");
+    item.innerHTML = `
+      <div class="node-item" id="ni-${n.key}">
+        <div class="node-icon" id="icon-${n.key}">
+          <span id="icon-sym-${n.key}">${STATUS_ICON.pending}</span>
+        </div>
+        <div class="node-text">
+          <div class="node-name" id="name-${n.key}">${n.label}</div>
+          <div class="node-status" id="status-${n.key}"></div>
+        </div>
+      </div>
+      ${i < NODES.length - 1 ? `<div class="node-connector" id="conn-${n.key}"></div>` : ""}
+    `;
+    list.appendChild(item);
+  });
+}
+
+function setNodeState(key, state) {
+  nodeStates[key] = state;
+  const icon   = document.getElementById(`icon-${key}`);
+  const sym    = document.getElementById(`icon-sym-${key}`);
+  const name   = document.getElementById(`name-${key}`);
+  const status = document.getElementById(`status-${key}`);
+  const conn   = document.getElementById(`conn-${key}`);
+  if (!icon) return;
+
+  icon.className   = `node-icon ${state}`;
+  sym.textContent  = STATUS_ICON[state] || "○";
+  name.className   = `node-name ${state}`;
+  status.textContent = STATUS_TEXT[state] || "";
+
+  if (conn) {
+    conn.className = `node-connector ${state === "done" ? "done" : state === "running" ? "running" : ""}`;
+  }
+
+  if (state === "done") {
+    const idx = NODES.findIndex(n => n.key === key);
+    for (let i = idx + 1; i < NODES.length; i++) {
+      if (nodeStates[NODES[i].key] === "pending") {
+        setNodeState(NODES[i].key, "running");
+        break;
+      }
+    }
+  }
+}
+
+function showAnalysisPhase() {
+  document.getElementById("input-phase").style.display    = "none";
+  document.getElementById("analysis-phase").style.display = "block";
+  const prompt = document.getElementById("prompt-input").value.trim();
+  document.getElementById("input-summary").innerHTML =
+    `<strong>${selectedFile.name}</strong> &nbsp;·&nbsp; ${prompt.slice(0, 60)}${prompt.length > 60 ? "…" : ""}`;
+  buildNodeChain();
+  setNodeState("profiling", "running");
+}
+
+function resetToInput() {
+  currentTaskId = null;
+  nodeStates    = {};
+  document.getElementById("input-phase").style.display    = "block";
+  document.getElementById("analysis-phase").style.display = "none";
+  document.getElementById("complete-card").classList.remove("visible");
+  document.getElementById("error-card").classList.remove("visible");
+  document.getElementById("download-pending").style.display = "block";
+}
+
+async function startAnalysis() {
+  const prompt = document.getElementById("prompt-input").value.trim();
+  if (!prompt || !selectedFile) return;
+
+  showAnalysisPhase();
+
+  const fd = new FormData();
+  fd.append("file",   selectedFile);
+  fd.append("prompt", prompt);
+  fd.append("level",  selectedLevel);
+  fd.append("tune",   tuneEnabled ? "true" : "false");
+
+  let resp;
+  try {
+    resp = await fetch("/analyze", { method: "POST", body: fd });
+  } catch (e) {
+    showError("无法连接到后端服务，请确认 server.py 正在运行。");
+    return;
+  }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    showError(body.detail || `服务器错误 (${resp.status})`);
+    return;
+  }
+  const { task_id } = await resp.json();
+  currentTaskId = task_id;
+
+  const es = new EventSource(`/progress/${task_id}`);
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.node) {
+      setNodeState(data.node, data.status);
+    } else if (data.event === "complete") {
+      es.close();
+      showComplete(data);
+    } else if (data.event === "error") {
+      es.close();
+      showError(data.message || "未知错误");
+    }
+  };
+  es.onerror = () => {
+    es.close();
+    showError("与服务器的连接中断，请刷新页面重试。");
+  };
+}
+
+function showComplete(data) {
+  document.getElementById("download-pending").style.display = "none";
+  const taskTypeMap = {
+    regression:           "回归",
+    classification:       "分类",
+    clustering:           "聚类",
+    anomaly_detection:    "异常检测",
+    correlation_analysis: "相关性分析",
+  };
+  const taskLabel = taskTypeMap[data.task_type] || data.task_type || "未知";
+  document.getElementById("complete-meta").textContent =
+    `任务类型：${taskLabel} · 最优模型：${data.best_model || "N/A"} · 用时 ${data.elapsed} 秒`;
+  document.getElementById("complete-card").classList.add("visible");
+}
+
+function showError(msg) {
+  document.getElementById("download-pending").style.display = "none";
+  document.getElementById("error-msg").textContent = msg;
+  document.getElementById("error-card").classList.add("visible");
+}
+
+function downloadReport() {
+  if (!currentTaskId) return;
+  window.location.href = `/report/${currentTaskId}`;
+}
+</script>
+</body>
+</html>
