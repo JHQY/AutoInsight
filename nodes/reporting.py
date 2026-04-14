@@ -236,91 +236,76 @@ def _generate_model_charts(state: AgentState) -> list:
 # ── LLM narrative (JSON sections only) ───────────────────────────────────────
 
 def _call_llm_narrative(state: AgentState) -> dict:
-    """Ask LLM to return narrative sections as JSON. Falls back to empty strings."""
-    user_level   = state.get("user_level", "general")
-    task_type    = state.get("task_type", "")
-    eda_summary  = state.get("eda_summary", {})
-    metrics      = state.get("metrics", {})
-    best_model   = state.get("best_model", "")
-    reasoning    = state.get("reasoning", "")
+    """Two-pass LLM calls: technical sections (with model data) + business answer sections (no model metrics)."""
+    technical = _call_llm_technical(state)
+    business  = _call_llm_business_answer(state)
+    return {**technical, **business}
+
+
+def _make_client() -> OpenAI:
+    return OpenAI(
+        api_key=os.environ.get("DEEPSEEK_API_KEY"),
+        base_url="https://api.deepseek.com",
+    )
+
+
+def _llm_call(prompt: str, max_tokens: int = 2000) -> dict:
+    """Call LLM, strip fences, parse JSON. Returns {} on failure."""
+    client = _make_client()
+    response = client.chat.completions.create(
+        model="deepseek-chat",
+        max_tokens=max_tokens,
+        temperature=0.3,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = response.choices[0].message.content.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+        raw = raw.rsplit("```", 1)[0].strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+
+def _call_llm_technical(state: AgentState) -> dict:
+    """Call 1: EDA narrative, model rationale, model analysis — has access to model metrics."""
+    user_level  = state.get("user_level", "general")
+    task_type   = state.get("task_type", "")
+    eda_summary = state.get("eda_summary", {})
+    metrics     = state.get("metrics", {})
+    best_model  = state.get("best_model", "")
+    reasoning   = state.get("reasoning", "")
 
     best_metrics = metrics.get(best_model, {}) if best_model else {}
     metrics_str  = json.dumps(
         {m: {k: round(v, 4) for k, v in mv.items() if isinstance(v, float)}
          for m, mv in metrics.items() if isinstance(mv, dict) and "error" not in mv},
-        ensure_ascii=False, indent=2
-    )
-
-    # Build prediction statistics so the LLM has real numbers to cite
-    prediction_stats_str = ""
-    best_result = (state.get("model_results") or {}).get(best_model, {})
-    predictions = best_result.get("predictions")
-    y_test = state.get("y_test")
-    if predictions is not None and task_type == "regression":
-        try:
-            preds = np.array(predictions).ravel()
-            preds = preds[np.isfinite(preds)]
-            if len(preds):
-                prediction_stats_str = (
-                    f"Predicted value distribution — "
-                    f"mean: {np.mean(preds):.2f}, median: {np.median(preds):.2f}, "
-                    f"std: {np.std(preds):.2f}, "
-                    f"range: [{np.min(preds):.2f}, {np.max(preds):.2f}], "
-                    f"25th pct: {np.percentile(preds, 25):.2f}, "
-                    f"75th pct: {np.percentile(preds, 75):.2f}"
-                )
-        except Exception:
-            pass
-
-    conclusions_spec_expert = (
-        "- \"conclusions\": 2-3 conclusions written as a DIRECT ANSWER to the user's specific question above.\n"
-        "  • If the question is about prediction/forecasting: state what the model says about the target's level, range, and direction, using the prediction statistics provided.\n"
-        "  • If the question is about key drivers: state which factors push the target up or down and by how much.\n"
-        "  • If the question is about segmentation/clustering: describe the groups found and what differentiates them.\n"
-        "  Do NOT list generic feature importances. Do NOT mention model names or accuracy scores. (bullet points, Chinese)"
-    )
-    conclusions_spec_general = (
-        "- \"conclusions\": 2-3 plain-language sentences that are a DIRECT ANSWER to the user's specific question above.\n"
-        "  • If the question is about prediction/forecasting: state the predicted price level/range/trend using the prediction statistics provided — give concrete numbers where available.\n"
-        "  • If the question is about key drivers: explain in plain language which factors matter most and how they affect the outcome.\n"
-        "  • If the question is about segmentation/clustering: describe the groups in terms the user cares about.\n"
-        "  Do NOT just list feature importances as if that were the answer. Do NOT mention model names or accuracy scores. (bullet points, Chinese)"
+        ensure_ascii=False, indent=2,
     )
 
     if user_level == "expert":
-        section_spec = f"""Return a JSON object with these keys:
+        section_spec = """Return a JSON object with exactly these keys:
 - "eda_narrative": technical EDA findings (2-3 paragraphs, Chinese)
-- "model_rationale": explain the algorithm selection reasoning (1-2 paragraphs, Chinese)
-- "model_analysis": interpret the best model's metrics technically (1-2 paragraphs, Chinese)
-{conclusions_spec_expert}
-- "recommendations": 3-5 concrete actions the user should take based on what the data revealed about their specific question — short-term (1-3 months) and long-term (3-12 months). Ground each action in the findings, not in model improvement. (bullet points, Chinese)
-- "risks": 2-3 risks or caveats relevant to acting on these findings (bullet points, Chinese)"""
+- "model_rationale": algorithm selection reasoning (1-2 paragraphs, Chinese)
+- "model_analysis": interpret the best model's metrics technically (1-2 paragraphs, Chinese)"""
     else:
-        section_spec = f"""Return a JSON object with these keys:
-- "eda_narrative": explain EDA findings in plain language without jargon (2-3 paragraphs, Chinese)
-- "model_rationale": explain in simple terms why these models were chosen (1 paragraph, Chinese)
-- "model_analysis": translate model performance into business meaning, no metric numbers (1-2 paragraphs, Chinese)
-{conclusions_spec_general}
-- "recommendations": 3-5 specific actions the user should take to act on the answer to their question — short-term (1-3 months) and long-term (3-12 months). These should follow naturally from the conclusions, not from model improvement ideas. (bullet points, Chinese)
-- "risks": 2-3 plain-language warnings about limitations of these findings for the user's decision (bullet points, Chinese)"""
+        section_spec = """Return a JSON object with exactly these keys:
+- "eda_narrative": EDA findings in plain language, no jargon (2-3 paragraphs, Chinese)
+- "model_rationale": why these models were chosen, simply explained (1 paragraph, Chinese)
+- "model_analysis": translate model performance into plain business meaning — no metric numbers (1-2 paragraphs, Chinese)"""
 
-    prediction_block = f"\nPrediction statistics:\n{prediction_stats_str}\n" if prediction_stats_str else ""
+    prompt = f"""You are a data analyst writing the technical sections of an analysis report.
 
-    prompt = f"""You are a business analyst answering a specific question the user asked about their data.
-Your ONE job: use the data findings to directly answer the user's question below.
-Do NOT write a generic data science report. Do NOT default to "key factors are X, Y, Z" unless that IS the answer to the question.
-
-User's question: {state.get("user_query", "")}
-Restated intent: {state.get("user_intent_summary", "")}
 Task type: {task_type}
+Model selection reasoning: {reasoning}
 
 EDA summary:
 - Top 3 features: {eda_summary.get("top3_features", "")}
 - Distribution: {eda_summary.get("distribution_desc", "")}
 - Layer analysis: {eda_summary.get("layer_desc", "")}
 - Outliers: {eda_summary.get("abnormal_desc", "")}
-{prediction_block}
-Model selection reasoning: {reasoning}
+
 Model results (all candidates):
 {metrics_str}
 
@@ -331,29 +316,82 @@ Best model metrics: {json.dumps({k: round(v, 4) for k, v in best_metrics.items()
 
 IMPORTANT: Return ONLY valid JSON. No markdown code fences, no extra text."""
 
-    client = OpenAI(
-        api_key=os.environ.get("DEEPSEEK_API_KEY"),
-        base_url="https://api.deepseek.com",
-    )
-    response = client.chat.completions.create(
-        model="deepseek-chat",
-        max_tokens=3000,
-        temperature=0.3,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw = response.choices[0].message.content.strip()
+    result = _llm_call(prompt, max_tokens=1500)
+    return {k: result.get(k, "") for k in ["eda_narrative", "model_rationale", "model_analysis"]}
 
-    # Strip markdown fences if present
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-        raw = raw.rsplit("```", 1)[0].strip()
 
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {k: "" for k in ["eda_narrative", "model_rationale",
-                                  "model_analysis", "conclusions",
-                                  "recommendations", "risks"]}
+def _call_llm_business_answer(state: AgentState) -> dict:
+    """Call 2: Conclusions, recommendations, risks — NO model metrics, only user question + data findings."""
+    user_level  = state.get("user_level", "general")
+    task_type   = state.get("task_type", "")
+    eda_summary = state.get("eda_summary", {})
+    best_model  = state.get("best_model", "")
+
+    # Prediction statistics for regression — the main quantitative evidence for answering the question
+    prediction_stats_str = ""
+    best_result = (state.get("model_results") or {}).get(best_model, {})
+    predictions = best_result.get("predictions")
+    if predictions is not None and task_type == "regression":
+        try:
+            preds = np.array(predictions).ravel()
+            preds = preds[np.isfinite(preds)]
+            if len(preds):
+                prediction_stats_str = (
+                    f"Data-based predicted value distribution:\n"
+                    f"  mean={np.mean(preds):.2f}, median={np.median(preds):.2f}, "
+                    f"std={np.std(preds):.2f}, "
+                    f"range=[{np.min(preds):.2f}, {np.max(preds):.2f}], "
+                    f"25th pct={np.percentile(preds, 25):.2f}, "
+                    f"75th pct={np.percentile(preds, 75):.2f}"
+                )
+        except Exception:
+            pass
+
+    if user_level == "expert":
+        section_spec = """Return a JSON object with exactly these keys:
+- "conclusions": 2-3 bullet points that DIRECTLY ANSWER the user's question using data findings.
+  Use concrete numbers from the prediction statistics if available.
+  Do NOT mention model names, R², RMSE, accuracy, or any ML metric.
+  Do NOT suggest deploying models, feature engineering, or SHAP analysis.
+- "recommendations": 3-5 bullet points of actions the user should take based on what the data reveals about THEIR question.
+  Short-term (1-3 months) and long-term (3-12 months).
+  Ground each recommendation in a specific data finding — NOT in model improvement.
+  Do NOT suggest deploying models or improving the ML pipeline.
+- "risks": 2-3 bullet points about data limitations or real-world caveats for the user's decision.
+All in Chinese."""
+    else:
+        section_spec = """Return a JSON object with exactly these keys:
+- "conclusions": 2-3 plain-language bullet points that DIRECTLY ANSWER the user's question.
+  Use concrete numbers from the prediction statistics if available.
+  FORBIDDEN: model names, R², RMSE, accuracy scores, "the model shows", feature importance lists.
+  FORBIDDEN: any suggestion about deploying models, improving algorithms, or SHAP analysis.
+- "recommendations": 3-5 plain-language actions the user should take based on what the data reveals.
+  Short-term (1-3 months) and long-term (3-12 months).
+  Each recommendation must be about what the USER should DO with the findings — not about improving the data pipeline.
+  FORBIDDEN: "deploy the model", "feature engineering", "collect more data", "tune hyperparameters".
+- "risks": 2-3 plain-language warnings about limitations relevant to the user's decision.
+All in Chinese."""
+
+    prediction_block = f"\n{prediction_stats_str}\n" if prediction_stats_str else ""
+
+    prompt = f"""A user asked a question about their data. Your job is to answer THEIR question — not to evaluate the ML model that was used internally.
+
+The user does not know or care that a machine learning model was used. They just want their question answered using data.
+
+USER'S QUESTION: {state.get("user_query", "")}
+(Restated as): {state.get("user_intent_summary", "")}
+
+Data findings you can use to answer:
+- Key features identified: {eda_summary.get("top3_features", "")}
+- Data distribution: {eda_summary.get("distribution_desc", "")}
+- Segment analysis: {eda_summary.get("layer_desc", "")}
+{prediction_block}
+{section_spec}
+
+IMPORTANT: Return ONLY valid JSON. No markdown code fences, no extra text."""
+
+    result = _llm_call(prompt, max_tokens=1500)
+    return {k: result.get(k, "") for k in ["conclusions", "recommendations", "risks"]}
 
 
 # ── Report assembly ───────────────────────────────────────────────────────────
