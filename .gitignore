@@ -20,3 +20,9 @@ outputs/reports/
 # OS
 .DS_Store
 Thumbs.db
+
+# Git worktrees
+.worktrees/
+
+# Brainstorming sessions
+.superpowers/
