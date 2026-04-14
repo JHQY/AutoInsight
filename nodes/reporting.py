@@ -57,7 +57,8 @@ def _generate_model_charts(state: AgentState) -> list:
 
     best = model_results.get(best_model, {})
     fitted_model = best.get("model")
-    predictions  = best.get("predictions")
+    # modeling.py stores supervised predictions as "y_pred", unsupervised as "labels"
+    predictions  = best.get("y_pred") or best.get("labels")
     feature_names = state.get("feature_names", [])
     y_test = state.get("y_test")
 
@@ -330,7 +331,7 @@ def _call_llm_business_answer(state: AgentState) -> dict:
     # Prediction statistics for regression — the main quantitative evidence for answering the question
     prediction_stats_str = ""
     best_result = (state.get("model_results") or {}).get(best_model, {})
-    predictions = best_result.get("predictions")
+    predictions = best_result.get("y_pred") or best_result.get("labels")
     if predictions is not None and task_type == "regression":
         try:
             preds = np.array(predictions).ravel()
