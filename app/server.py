@@ -12,6 +12,10 @@ from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from dotenv import load_dotenv, find_dotenv
+# find_dotenv() walks up from cwd until it finds a .env file (works in worktrees too)
+load_dotenv(find_dotenv())
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
