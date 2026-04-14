@@ -154,6 +154,20 @@ async def progress(task_id: str):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@app.get("/debug/{task_id}")
+def debug(task_id: str):
+    """Return insight_data and key state fields for diagnosing report quality."""
+    if task_id not in TASK_RESULTS:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    state = TASK_RESULTS[task_id]
+    return {
+        "task_type":    state.get("task_type"),
+        "best_model":   state.get("best_model"),
+        "insight_data": state.get("insight_data") or {},
+        "logs_tail":    (state.get("logs") or [])[-20:],
+    }
+
+
 @app.get("/predictions/{task_id}")
 def predictions(task_id: str):
     if task_id not in TASK_RESULTS:

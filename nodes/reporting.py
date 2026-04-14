@@ -394,55 +394,70 @@ IMPORTANT: Return ONLY valid JSON. No markdown code fences, no extra text."""
 
 
 def _call_llm_business_answer(state: AgentState) -> dict:
-    """Call 2: Conclusions, recommendations, risks — NO model metrics, only user question + data findings."""
-    user_level  = state.get("user_level", "general")
-    task_type   = state.get("task_type", "")
-    eda_summary = state.get("eda_summary", {})
-    best_model  = state.get("best_model", "")
+    """Call 2: Conclusions, recommendations, risks.
+    Receives ONLY user question + structured insight findings.
+    No model metrics, no raw EDA text — nothing the LLM can misuse.
+    """
+    user_level   = state.get("user_level", "general")
+    task_type    = state.get("task_type", "")
+    eda_summary  = state.get("eda_summary", {})
 
-    # Insight data from the insight extraction node
-    insight_data = state.get("insight_data") or {}
+    insight_data  = state.get("insight_data") or {}
     insight_block = _format_insight_for_llm(insight_data, task_type)
 
+    # If insight extraction produced nothing, build a minimal fallback
+    # so the LLM isn't tempted to invent model metrics to fill the void.
+    if not insight_block:
+        top3 = eda_summary.get("top3_features", "")
+        insight_block = (
+            f"\nThe analysis identified these key features related to the outcome: {top3}\n"
+            "(No further quantitative findings available — answer based on feature relationships only.)"
+            if top3 else
+            "\n(No quantitative findings available — answer at a high level based on the question.)"
+        )
+
+    # Concrete examples anchor the LLM better than FORBIDDEN lists.
     if user_level == "expert":
-        section_spec = """Return a JSON object with exactly these keys:
-- "conclusions": 2-3 bullet points that DIRECTLY ANSWER the user's question using the data findings above.
-  Use specific numbers and feature names where available.
-  Do NOT mention model names, R², RMSE, accuracy, or any ML metric.
-  Do NOT suggest deploying models, feature engineering, or SHAP analysis.
-- "recommendations": 3-5 bullet points of actions the user should take based on the findings.
+        output_spec = """Return a JSON object with exactly these keys:
+- "conclusions": 2-3 bullet points that DIRECTLY ANSWER the user's question.
+  Write like a business analyst presenting findings to a client — cite the specific features,
+  percentages, or value ranges from the findings above.
+  ✗ BAD: "模型R²=0.82，RMSE=48326，表明拟合效果较好。"
+  ✓ GOOD: "家庭收入（median_income）对房价影响最大（占52%），正相关——收入越高区域，预测房价中位数越高。"
+  Never mention model names, R², RMSE, MAE, accuracy, or any ML metric.
+- "recommendations": 3-5 bullet points of concrete actions the user should take.
   Short-term (1-3 months) and long-term (3-12 months).
-  Ground each recommendation in a specific finding — NOT in model improvement.
-- "risks": 2-3 bullet points about data limitations or real-world caveats for the user's decision.
+  Each action must follow from a specific finding, not from model improvement.
+  ✗ BAD: "建议对LightGBM进行超参数调优，调整num_leaves以减少过拟合。"
+  ✓ GOOD: "短期：优先关注median_income高于X的区域，该特征对房价影响最显著。"
+- "risks": 2-3 bullet points about real-world limitations of acting on these findings.
 All in Chinese."""
     else:
-        section_spec = """Return a JSON object with exactly these keys:
+        output_spec = """Return a JSON object with exactly these keys:
 - "conclusions": 2-3 plain-language bullet points that DIRECTLY ANSWER the user's question.
-  Use specific numbers where available.
-  FORBIDDEN: model names, R², RMSE, accuracy scores, "the model shows".
-  FORBIDDEN: deploying models, improving algorithms, SHAP analysis.
-- "recommendations": 3-5 plain-language actions the user should take based on the findings.
+  Use simple language. Cite specific features and numbers from the findings above.
+  ✗ BAD: "最佳模型LGBMRegressor的R²=0.8218，MAE约为32,574美元，建议部署该模型。"
+  ✓ GOOD: "影响房价最关键的因素是家庭收入水平（占影响力的52%），其次是地理位置（南北差异显著）。"
+  ✗ BAD: "建议进行特征工程，创建房间密度等衍生特征以提升模型表现。"
+  ✓ GOOD: "短期内可重点关注高收入（median_income较高）且位于南部（latitude较低）的区域，这类房产预测价格普遍较高。"
+- "recommendations": 3-5 plain-language actions the user should take.
   Short-term (1-3 months) and long-term (3-12 months).
-  Each recommendation is about what the USER should DO — not about improving the data pipeline.
-  FORBIDDEN: "deploy the model", "feature engineering", "collect more data", "tune hyperparameters".
-- "risks": 2-3 plain-language warnings about limitations relevant to the user's decision.
+  Focus on what the USER should DO with the findings.
+- "risks": 2-3 plain-language warnings about limitations for the user's decision.
 All in Chinese."""
 
-    prompt = f"""A user asked a question about their data. Your job is to answer THEIR question using the data findings below.
+    prompt = f"""You are a business analyst presenting findings to answer a client's specific question.
+Your job: use ONLY the data findings listed below to answer the question. Nothing else.
 
-The user does not know or care that a machine learning model was used. They just want their question answered.
-
-USER'S QUESTION: {state.get("user_query", "")}
+CLIENT'S QUESTION: {state.get("user_query", "")}
 (Restated as): {state.get("user_intent_summary", "")}
 
-Data findings:
-- Key features: {eda_summary.get("top3_features", "")}
-- Distribution: {eda_summary.get("distribution_desc", "")}
-- Segment patterns: {eda_summary.get("layer_desc", "")}
+DATA FINDINGS:
 {insight_block}
-{section_spec}
 
-IMPORTANT: Return ONLY valid JSON. No markdown code fences, no extra text."""
+{output_spec}
+
+IMPORTANT: Return ONLY valid JSON. No markdown fences, no extra text outside the JSON."""
 
     result = _llm_call(prompt, max_tokens=1500)
     return {k: result.get(k, "") for k in ["conclusions", "recommendations", "risks"]}
