@@ -95,6 +95,9 @@ async def analyze(
         "X_train": None, "X_test": None,
         "y_train": None, "y_test": None,
         "report_path":          "",
+        "prediction_path":      "",
+        "prediction_stats":     {},
+        "X_full":               None,
     }
 
     _start_analysis(task_id, initial_state)
@@ -149,6 +152,23 @@ async def progress(task_id: str):
             yield f"data: {item}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/predictions/{task_id}")
+def predictions(task_id: str):
+    if task_id not in TASK_RESULTS:
+        raise HTTPException(status_code=404, detail="Task not found or not yet complete.")
+
+    pred_path = TASK_RESULTS[task_id].get("prediction_path", "")
+    if not pred_path or not os.path.exists(pred_path):
+        raise HTTPException(status_code=404, detail="Predictions file not found.")
+
+    filename = os.path.basename(pred_path)
+    return FileResponse(
+        pred_path,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/report/{task_id}")

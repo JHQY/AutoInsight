@@ -59,10 +59,14 @@ def data_processing(state: AgentState) -> AgentState:
         X[numeric_cols] = scaler.fit_transform(X[numeric_cols])
         logs.append(f"[processing] 数值列 {numeric_cols} 标准化完成")
 
+    # Save full processed feature matrix for downstream inference
+    X_full = X.copy()
+
     # Train/test split — unsupervised: no y
     if task_category in ("unsupervised", "analytical") or not target_col:
         from sklearn.model_selection import train_test_split as _split
         X_train, X_test = _split(X, test_size=0.2, random_state=42)
+        state["X_full"] = X_full
         state["X_train"] = X_train
         state["X_test"] = X_test
         state["y_train"] = None
@@ -84,6 +88,7 @@ def data_processing(state: AgentState) -> AgentState:
         )
         logs.append("[processing] 回归任务，使用普通 80/20 拆分")
 
+    state["X_full"] = X_full
     state["X_train"] = X_train
     state["X_test"] = X_test
     state["y_train"] = y_train

@@ -247,6 +247,7 @@
       <div class="complete-title">✓ 分析完成</div>
       <div class="complete-meta" id="complete-meta"></div>
       <button class="btn-download" onclick="downloadReport()">⬇ 下载分析报告（Markdown）</button>
+      <button class="btn-download btn-download-pred" id="btn-predictions" onclick="downloadPredictions()" style="display:none">⬇ 下载预测结果（CSV）</button>
       <button class="btn-reset" onclick="resetToInput()">重新分析</button>
     </div>
     <div id="error-card">
@@ -260,14 +261,15 @@
 
 <script>
 const NODES = [
-  { key: "profiling",      label: "数据剖析" },
-  { key: "intent_routing", label: "意图识别" },
+  { key: "profiling",      label: "数据剖析"         },
+  { key: "intent_routing", label: "意图识别"         },
   { key: "processing",     label: "数据清洗" },
   { key: "eda",            label: "探索性分析（EDA）" },
   { key: "model_routing",  label: "模型路由" },
-  { key: "modeling",       label: "建模" },
-  { key: "evaluation",     label: "模型评估" },
-  { key: "reporting",      label: "报告生成" },
+  { key: "modeling",       label: "建模"             },
+  { key: "evaluation",     label: "模型评估"         },
+  { key: "inference",      label: "全量推理"         },
+  { key: "reporting",      label: "报告生成"         },
 ];
 
 const STATUS_TEXT = { running: "正在运行…", done: "已完成", skipped: "已跳过", error: "出错" };
@@ -479,6 +481,10 @@ function showComplete(data) {
   const taskLabel = taskTypeMap[data.task_type] || data.task_type || "未知";
   document.getElementById("complete-meta").textContent =
     `任务类型：${taskLabel} · 最优模型：${data.best_model || "N/A"} · 用时 ${data.elapsed} 秒`;
+  // Show predictions download button only when inference ran (non-analytical tasks)
+  const hasPredictions = data.task_type && data.task_type !== "correlation_analysis";
+  const predBtn = document.getElementById("btn-predictions");
+  if (predBtn) predBtn.style.display = hasPredictions ? "block" : "none";
   document.getElementById("complete-card").classList.add("visible");
 }
 
@@ -491,6 +497,11 @@ function showError(msg) {
 function downloadReport() {
   if (!currentTaskId) return;
   window.location.href = `/report/${currentTaskId}`;
+}
+
+function downloadPredictions() {
+  if (!currentTaskId) return;
+  window.location.href = `/predictions/${currentTaskId}`;
 }
 </script>
 </body>

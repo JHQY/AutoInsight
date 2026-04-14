@@ -43,6 +43,7 @@ class AgentState(TypedDict, total=False):
     user_intent_summary:  str        # 白话描述用户意图，供报告用
 
     # ── Processing ───────────────────────────────────────────────────
+    X_full:               pd.DataFrame             # full processed feature matrix (pre-split)
     X_train:              pd.DataFrame
     X_test:               pd.DataFrame
     y_train:              Optional[pd.DataFrame]   # 无监督任务为 None
@@ -66,6 +67,9 @@ class AgentState(TypedDict, total=False):
     best_model:           str
 
     # ── Reporting ────────────────────────────────────────────────────
+    prediction_path:      str
+    prediction_stats:     dict
+
     report_path:          str
 
     # ── 全局 ─────────────────────────────────────────────────────────

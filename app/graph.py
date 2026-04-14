@@ -8,11 +8,12 @@ from nodes.eda            import run_eda
 from nodes.model_routing  import model_routing_node
 from nodes.modeling       import modeling_node
 from nodes.evaluation     import evaluation_node
+from nodes.inference      import inference_node
 from nodes.reporting      import generate_report
 
 
 def _route_after_model_routing(state: AgentState) -> str:
-    """correlation_analysis skips Modeling + Evaluation, goes directly to Reporting."""
+    """correlation_analysis skips Modeling + Evaluation + Inference, goes directly to Reporting."""
     if state.get("task_type") == "correlation_analysis":
         return "reporting"
     return "modeling"
@@ -28,6 +29,7 @@ def build_graph():
     graph.add_node("model_routing",  model_routing_node)
     graph.add_node("modeling",       modeling_node)
     graph.add_node("evaluation",     evaluation_node)
+    graph.add_node("inference",      inference_node)
     graph.add_node("reporting",      generate_report)
 
     graph.set_entry_point("profiling")
@@ -41,7 +43,8 @@ def build_graph():
         {"modeling": "modeling", "reporting": "reporting"},
     )
     graph.add_edge("modeling",       "evaluation")
-    graph.add_edge("evaluation",     "reporting")
+    graph.add_edge("evaluation",     "inference")
+    graph.add_edge("inference",      "reporting")
     graph.add_edge("reporting",      END)
 
     return graph.compile()

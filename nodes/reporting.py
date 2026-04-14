@@ -328,25 +328,38 @@ def _call_llm_business_answer(state: AgentState) -> dict:
     eda_summary = state.get("eda_summary", {})
     best_model  = state.get("best_model", "")
 
-    # Prediction statistics for regression — the main quantitative evidence for answering the question
+    # Prediction statistics come from the inference node (full-dataset predictions)
+    prediction_stats = state.get("prediction_stats") or {}
     prediction_stats_str = ""
-    best_result = (state.get("model_results") or {}).get(best_model, {})
-    predictions = best_result.get("y_pred") or best_result.get("labels")
-    if predictions is not None and task_type == "regression":
-        try:
-            preds = np.array(predictions).ravel()
-            preds = preds[np.isfinite(preds)]
-            if len(preds):
-                prediction_stats_str = (
-                    f"Data-based predicted value distribution:\n"
-                    f"  mean={np.mean(preds):.2f}, median={np.median(preds):.2f}, "
-                    f"std={np.std(preds):.2f}, "
-                    f"range=[{np.min(preds):.2f}, {np.max(preds):.2f}], "
-                    f"25th pct={np.percentile(preds, 25):.2f}, "
-                    f"75th pct={np.percentile(preds, 75):.2f}"
-                )
-        except Exception:
-            pass
+    if prediction_stats:
+        if task_type == "regression":
+            ps = prediction_stats
+            prediction_stats_str = (
+                f"Full-dataset predicted value distribution ({ps.get('count', '?')} rows):\n"
+                f"  mean={ps.get('mean','?')}, median={ps.get('median','?')}, "
+                f"std={ps.get('std','?')}, "
+                f"range=[{ps.get('min','?')}, {ps.get('max','?')}], "
+                f"25th pct={ps.get('p25','?')}, 75th pct={ps.get('p75','?')}, "
+                f"90th pct={ps.get('p90','?')}"
+            )
+        elif task_type == "classification":
+            ps = prediction_stats
+            dist = ps.get("class_distribution", {})
+            ratios = ps.get("class_ratios", {})
+            lines = [f"  {k}: {dist.get(k,0)} rows ({round(ratios.get(k,0)*100,1)}%)" for k in dist]
+            prediction_stats_str = f"Full-dataset prediction class breakdown ({ps.get('total','?')} rows):\n" + "\n".join(lines)
+        elif task_type == "clustering":
+            ps = prediction_stats
+            sizes = ps.get("cluster_sizes", {})
+            lines = [f"  Cluster {k}: {v} rows" for k, v in sizes.items()]
+            prediction_stats_str = f"Full-dataset cluster assignment ({ps.get('n_clusters','?')} clusters):\n" + "\n".join(lines)
+        elif task_type == "anomaly_detection":
+            ps = prediction_stats
+            prediction_stats_str = (
+                f"Full-dataset anomaly detection ({ps.get('total','?')} rows): "
+                f"{ps.get('n_anomaly','?')} anomalies ({round(ps.get('anomaly_ratio',0)*100,1)}%), "
+                f"{ps.get('n_normal','?')} normal"
+            )
 
     if user_level == "expert":
         section_spec = """Return a JSON object with exactly these keys:
