@@ -451,6 +451,23 @@ async function startAnalysis() {
 }
 
 function showComplete(data) {
+  // Flush any nodes still showing as running/pending to done,
+  // in case rapid-fire SSE events arrived before DOM could update.
+  NODES.forEach(n => {
+    if (nodeStates[n.key] === "running" || nodeStates[n.key] === "pending") {
+      nodeStates[n.key] = "done";
+      const icon   = document.getElementById(`icon-${n.key}`);
+      const sym    = document.getElementById(`icon-sym-${n.key}`);
+      const name   = document.getElementById(`name-${n.key}`);
+      const status = document.getElementById(`status-${n.key}`);
+      const conn   = document.getElementById(`conn-${n.key}`);
+      if (icon) { icon.className = "node-icon done"; }
+      if (sym)  { sym.textContent = "✓"; }
+      if (name) { name.className = "node-name done"; }
+      if (status) { status.textContent = "已完成"; }
+      if (conn)   { conn.className = "node-connector done"; }
+    }
+  });
   document.getElementById("download-pending").style.display = "none";
   const taskTypeMap = {
     regression:           "回归",

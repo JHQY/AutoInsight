@@ -20,10 +20,16 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 
-_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+_STATIC_DIR  = os.path.join(os.path.dirname(__file__), "static")
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_CHARTS_DIR  = os.path.join(_PROJECT_ROOT, "outputs", "charts")
 
 app = FastAPI(title="AutoInsight")
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+# Serve chart images so downloaded reports can reference them via HTTP URL
+os.makedirs(_CHARTS_DIR, exist_ok=True)
+app.mount("/charts", StaticFiles(directory=_CHARTS_DIR), name="charts")
 
 # task_id -> queue.Queue (sentinel: None)
 TASK_QUEUES: dict[str, queue.Queue] = {}
@@ -154,9 +160,22 @@ def report(task_id: str):
     if not report_path or not os.path.exists(report_path):
         raise HTTPException(status_code=404, detail="Report file not found.")
 
+    with open(report_path, encoding="utf-8") as f:
+        content = f.read()
+
+    # Rewrite relative chart paths (e.g. ../charts/foo.png) to HTTP URLs
+    # so images render correctly when the .md is opened anywhere
+    import re
+    content = re.sub(
+        r'!\[([^\]]*)\]\(\.\./charts/([^)]+)\)',
+        r'![\1](http://localhost:8000/charts/\2)',
+        content,
+    )
+
     filename = os.path.basename(report_path)
-    return FileResponse(
-        report_path,
+    from fastapi.responses import Response
+    return Response(
+        content=content.encode("utf-8"),
         media_type="text/markdown",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
