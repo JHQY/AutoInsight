@@ -256,22 +256,24 @@ def _call_llm_narrative(state: AgentState) -> dict:
 - "eda_narrative": technical EDA findings (2-3 paragraphs, Chinese)
 - "model_rationale": explain the algorithm selection reasoning (1-2 paragraphs, Chinese)
 - "model_analysis": interpret the best model's metrics technically (1-2 paragraphs, Chinese)
-- "conclusions": data-driven conclusions with specific numbers (bullet points, Chinese)
-- "recommendations": actionable technical recommendations (bullet points, Chinese)
-- "risks": technical risks and limitations (bullet points, Chinese)"""
+- "conclusions": 2-3 conclusions that DIRECTLY ANSWER the user's business question — cite specific features/patterns found in data, NOT model accuracy scores (bullet points, Chinese)
+- "recommendations": 3-5 concrete actions the user should take based on what the data revealed about their question — short-term (1-3 months) and long-term (3-12 months) (bullet points, Chinese)
+- "risks": 2-3 risks or caveats relevant to acting on these findings (bullet points, Chinese)"""
     else:
         section_spec = """Return a JSON object with these keys:
 - "eda_narrative": explain EDA findings in plain language without jargon (2-3 paragraphs, Chinese)
 - "model_rationale": explain in simple terms why these models were chosen (1 paragraph, Chinese)
 - "model_analysis": translate model performance into business meaning, no metric numbers (1-2 paragraphs, Chinese)
-- "conclusions": 2-3 plain-language business conclusions (bullet points, Chinese)
-- "recommendations": 3-5 specific action items (short-term 1-3 months + long-term 3-12 months, Chinese)
-- "risks": 2-3 plain-language risk warnings (bullet points, Chinese)"""
+- "conclusions": 2-3 plain-language conclusions that DIRECTLY ANSWER the user's business question — e.g. which factors matter most, what the data reveals. Do NOT mention model names or accuracy scores (bullet points, Chinese)
+- "recommendations": 3-5 specific actions the user should take based on what the data revealed — short-term (1-3 months) and long-term (3-12 months). Focus on the user's actual goal, not on improving the model (bullet points, Chinese)
+- "risks": 2-3 plain-language warnings about limitations of these findings for the user's decision (bullet points, Chinese)"""
 
-    prompt = f"""You are a data analysis report writer.
+    prompt = f"""You are a business analyst writing a report for a user who asked a specific business question.
+Your job is to answer THEIR question using data findings — not to evaluate the ML model.
 
+User's original question: {state.get("user_query", "")}
+Restated intent: {state.get("user_intent_summary", "")}
 Task type: {task_type}
-User intent: {state.get("user_intent_summary", "")}
 Model selection reasoning: {reasoning}
 
 EDA summary:
