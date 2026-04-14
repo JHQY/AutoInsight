@@ -1,11 +1,12 @@
 import os
+from typing import Literal
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
 from app.state import AgentState
 
 
 class ModelRoutingOutput(BaseModel):
-    task_type:           str        # exact task type (one of 5)
+    task_type:           Literal["classification", "regression", "clustering", "anomaly_detection", "correlation_analysis"]
     selected_algorithms: list[str]  # 2-3 algorithms; empty for correlation_analysis
     reasoning:           str        # one-sentence explanation
 
@@ -63,8 +64,11 @@ Available algorithms:
 
 {_SELECTION_RULES}
 
+IMPORTANT — task_type must be EXACTLY one of these 5 strings (not a category like "supervised"/"unsupervised"):
+  classification | regression | clustering | anomaly_detection | correlation_analysis
+
 Output:
-- task_type: confirm or refine (pick exactly one of the 5 task types)
+- task_type: confirm or refine the initial task type — use ONLY the 5 strings above
 - selected_algorithms: list of 2-3 algorithm names from the menu above; [] for correlation_analysis
 - reasoning: one concise English sentence explaining your algorithm selection
 """

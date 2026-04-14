@@ -50,6 +50,12 @@ def evaluation_node(state: AgentState) -> dict:
             metrics[algo_name] = compute_anomaly_metrics(result["labels"], contamination)
 
     if not metrics:
+        known_types = {"classification", "regression", "clustering", "anomaly_detection"}
+        if task_type not in known_types:
+            raise RuntimeError(
+                f"Unknown task_type '{task_type}' — expected one of {known_types}. "
+                "Check model_routing output."
+            )
         raise RuntimeError("All models failed — cannot select best_model.")
 
     best_model = _select_best(metrics, task_type)

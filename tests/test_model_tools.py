@@ -90,3 +90,84 @@ def test_classification_metrics_known_values():
     assert metrics["recall"] < 1.0       # not perfect recall
     assert metrics["precision"] > 0.0    # some precision
     assert metrics["f1"] > 0.0 and metrics["f1"] <= 1.0
+
+
+def test_registry_contains_clustering_algorithms():
+    required = {"KMeans", "DBSCAN", "AgglomerativeClustering"}
+    assert required.issubset(set(ALGORITHM_REGISTRY.keys()))
+
+
+def test_registry_contains_anomaly_algorithms():
+    required = {"IsolationForest", "LocalOutlierFactor", "OneClassSVM"}
+    assert required.issubset(set(ALGORITHM_REGISTRY.keys()))
+
+
+def test_registry_contains_svc_and_lasso():
+    assert "SVC" in ALGORITHM_REGISTRY
+    assert "Lasso" in ALGORITHM_REGISTRY
+
+
+def test_clustering_metrics_keys():
+    from tools.model_tools import compute_clustering_metrics
+    import numpy as np
+    X = np.random.randn(50, 2)
+    labels = [0] * 25 + [1] * 25
+    metrics = compute_clustering_metrics(X, labels)
+    assert "silhouette" in metrics
+    assert "davies_bouldin" in metrics
+
+
+def test_clustering_metrics_values_are_finite():
+    from tools.model_tools import compute_clustering_metrics
+    import numpy as np
+    import math
+    X = np.random.randn(50, 2)
+    labels = [0] * 25 + [1] * 25
+    metrics = compute_clustering_metrics(X, labels)
+    assert math.isfinite(metrics["silhouette"])
+    assert math.isfinite(metrics["davies_bouldin"])
+
+
+def test_clustering_metrics_single_cluster_returns_sentinel():
+    from tools.model_tools import compute_clustering_metrics
+    import numpy as np
+    X = np.random.randn(20, 2)
+    labels = [0] * 20  # all same cluster
+    metrics = compute_clustering_metrics(X, labels)
+    assert metrics["silhouette"] == -1.0
+    assert metrics["davies_bouldin"] == 999.0
+
+
+def test_anomaly_metrics_keys():
+    from tools.model_tools import compute_anomaly_metrics
+    preds = [-1, 1, -1, 1, 1] * 10
+    metrics = compute_anomaly_metrics(preds, contamination=0.1)
+    assert "anomaly_ratio" in metrics
+    assert "anomaly_count" in metrics
+    assert "contamination" in metrics
+
+
+def test_anomaly_metrics_ratio_correct():
+    from tools.model_tools import compute_anomaly_metrics
+    preds = [1] * 18 + [-1, -1]
+    metrics = compute_anomaly_metrics(preds, contamination=0.05)
+    assert metrics["anomaly_count"] == 2
+    assert abs(metrics["anomaly_ratio"] - 0.1) < 0.01
+
+
+def test_tune_model_returns_fitted_model(clf_arrays):
+    from tools.model_tools import tune_model
+    X_train, X_test, y_train, _ = clf_arrays
+    y_fit = y_train.values.ravel()
+    model = tune_model("RandomForestClassifier", X_train, y_fit, "classification")
+    assert hasattr(model, "predict")
+    preds = model.predict(X_test)
+    assert len(preds) == len(X_test)
+
+
+def test_tune_model_raises_for_unsupervised():
+    from tools.model_tools import tune_model
+    import pandas as pd, numpy as np
+    X = pd.DataFrame(np.random.randn(50, 2))
+    with pytest.raises(ValueError, match="tune_model"):
+        tune_model("KMeans", X, None, "clustering")

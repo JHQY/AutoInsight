@@ -100,7 +100,7 @@ def run_single(case: dict, out_dir: Path) -> dict:
     prev_time     = wall_start
     prev_mem      = mem_start
     error         = None
-    final_state   = {}
+    final_state   = dict(initial_state)  # accumulate all node updates
 
     try:
         for chunk in graph.stream(initial_state, stream_mode="updates"):
@@ -108,6 +108,7 @@ def run_single(case: dict, out_dir: Path) -> dict:
             mem_now  = _mem_mb()
             node_name = next(iter(chunk))
             node_state = chunk[node_name]
+            final_state.update(node_state)  # merge updates into accumulated state
 
             # Collect all logs from state up to this point
             all_logs = node_state.get("logs", [])
@@ -191,7 +192,6 @@ def run_single(case: dict, out_dir: Path) -> dict:
                 }
 
             node_records[node_name] = record
-            final_state = node_state
             prev_time = now
             prev_mem  = mem_now
 
